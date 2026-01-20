@@ -81,7 +81,12 @@ body {
     line-height: 1.6;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
     font-family: var(--font-heading);
     letter-spacing: -0.03em;
     color: var(--text-primary);
@@ -161,6 +166,7 @@ h1, h2, h3, h4, h5, h6 {
         opacity: 0;
         transform: translateY(20px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -168,9 +174,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @keyframes pulseSoft {
-    0%, 100% {
+
+    0%,
+    100% {
         box-shadow: 0 0 0 0 var(--primary-glow);
     }
+
     50% {
         box-shadow: 0 0 20px 0 var(--primary-glow);
     }
@@ -182,9 +191,17 @@ h1, h2, h3, h4, h5, h6 {
     /* JS will trigger */
 }
 
-.delay-1 { animation-delay: 0.1s; }
-.delay-2 { animation-delay: 0.2s; }
-.delay-3 { animation-delay: 0.3s; }
+.delay-1 {
+    animation-delay: 0.1s;
+}
+
+.delay-2 {
+    animation-delay: 0.2s;
+}
+
+.delay-3 {
+    animation-delay: 0.3s;
+}
 
 /* ==================== NAVBAR ==================== */
 .navbar {
@@ -288,14 +305,24 @@ footer {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 /* Mobile Tweaks */
 @media (max-width: 768px) {
-    .navbar { padding: 1rem; }
-    .transfer-card { padding: 1.5rem; }
+    .navbar {
+        padding: 1rem;
+    }
+
+    .transfer-card {
+        padding: 1.5rem;
+    }
 }
 
 /* ===============================================
@@ -413,8 +440,13 @@ footer {
 }
 
 @keyframes rotateBin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Queue List Container */
@@ -447,6 +479,7 @@ footer {
         opacity: 0;
         transform: translateY(10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -548,4 +581,110 @@ footer {
         width: 250px;
         height: 250px;
     }
+}
+
+/* ==================== NEW FEATURE STYLES ==================== */
+
+/* Peer Selection */
+.peer-pill.selected {
+    border-color: var(--accent);
+    background: rgba(52, 211, 153, 0.1);
+}
+
+.peer-select-checkbox {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-light);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.peer-select-checkbox:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.peer-select-checkbox:checked::after {
+    content: '✓';
+    position: absolute;
+    color: white;
+    font-size: 12px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Queue Control Buttons */
+.queue-ctrl-btn {
+    transition: all 0.2s ease;
+}
+
+.queue-ctrl-btn:hover {
+    background: var(--primary-glow) !important;
+    color: var(--primary) !important;
+}
+
+/* Speed Test Button */
+.speed-test-btn {
+    transition: all 0.2s ease;
+}
+
+.speed-test-btn:hover {
+    background: var(--accent-glow) !important;
+    color: var(--accent) !important;
+}
+
+/* Spin Animation */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Desktop Only */
+@media (max-width: 768px) {
+    .desktop-only {
+        display: none !important;
+    }
+}
+
+/* Share Modal Social Buttons */
+.share-social-btn {
+    background: var(--bg-main);
+    border: 1px solid var(--border-light);
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+}
+
+.share-social-btn:hover {
+    border-color: var(--primary);
+    background: var(--primary-glow);
+}
+
+/* Transfer Card Cancel Button */
+.transfer-cancel-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.transfer-cancel-btn:hover {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
 }

@@ -780,7 +780,7 @@
                         <span>ID: </span><b id="myPeerId" style="margin: 0 0.5rem;">...</b> 📋
                     </button>
                     <button class="btn-ghost" id="showQrBtn"
-                        style="width: 40px; height: 40px; padding: 0; border-radius: 50%;">
+                        style="width: 40px; height: 40px; padding: 0; border-radius: 50%;" title="Show QR Code">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <rect x="3" y="3" width="7" height="7" />
@@ -788,6 +788,19 @@
                             <rect x="14" y="14" width="7" height="7" />
                             <rect x="3" y="14" width="7" height="7" />
                         </svg>
+                    </button>
+                    <button class="btn-primary" id="shareBtn"
+                        style="padding: 0.5rem 1rem; border-radius: 50px; display: flex; align-items: center; gap: 0.5rem;"
+                        title="Share Link">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="18" cy="5" r="3" />
+                            <circle cx="6" cy="12" r="3" />
+                            <circle cx="18" cy="19" r="3" />
+                            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                        </svg>
+                        <span class="desktop-only">Share</span>
                     </button>
                     <button class="btn-ghost" id="disconnectBtn"
                         style="color: var(--danger); border-color: var(--danger); border-radius: 50px; padding: 0.5rem 1rem;">
@@ -827,7 +840,19 @@
                 <!-- Right: Transfer Queue -->
                 <div class="right-pane">
                     <div class="transfers-header">
-                        Activity
+                        <span>Activity</span>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <span id="queueStats"
+                                style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"></span>
+                            <button id="pauseQueueBtn" class="queue-ctrl-btn" title="Pause Queue"
+                                style="background: var(--bg-main); border: none; padding: 0.3rem 0.6rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.8rem;">
+                                ⏸️
+                            </button>
+                            <button id="clearQueueBtn" class="queue-ctrl-btn" title="Clear Queue"
+                                style="background: var(--bg-main); border: none; padding: 0.3rem 0.6rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.8rem;">
+                                🗑️
+                            </button>
+                        </div>
                     </div>
                     <div class="transfers-panel" id="transferQueue">
                         <!-- Transfers appear here -->
