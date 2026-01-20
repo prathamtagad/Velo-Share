@@ -504,30 +504,237 @@
             </div>
         </div>
 
-        <!-- ==================== ROOM SCREEN ==================== -->
-        <div id="roomScreen" style="display: none; flex: 1; flex-direction: column;">
 
-            <!-- Top Bar -->
-            <header class="top-bar">
-                <a href="/" class="logo" style="font-size: 1.25rem;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <style>
+            /* New Dashboard Styles */
+            .dashboard-layout {
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+                overflow: hidden;
+            }
+
+            .dashboard-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 1rem 1.5rem;
+                background: var(--bg-surface);
+                border-bottom: 1px solid var(--border-light);
+            }
+
+            .peer-bar {
+                display: flex;
+                gap: 1rem;
+                padding: 1rem 1.5rem;
+                overflow-x: auto;
+                background: var(--bg-main);
+                border-bottom: 1px solid var(--border-light);
+                align-items: center;
+                scrollbar-width: none;
+                /* Hide scrollbar */
+            }
+
+            .peer-bar::-webkit-scrollbar {
+                display: none;
+            }
+
+            .peer-pill {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                background: var(--bg-surface);
+                padding: 0.5rem 1rem;
+                border-radius: 50px;
+                border: 1px solid var(--border-light);
+                min-width: fit-content;
+                transition: all 0.2s;
+            }
+
+            .peer-pill.active {
+                border-color: var(--accent);
+                white-space: nowrap;
+            }
+
+            .peer-pill-avatar {
+                width: 24px;
+                height: 24px;
+                background: var(--primary-glow);
+                color: var(--primary);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: bold;
+                font-size: 0.8rem;
+            }
+
+            .main-stage {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 2rem;
+                position: relative;
+                overflow-y: auto;
+            }
+
+            /* Portal Drop Zone */
+            .portal-zone {
+                width: 280px;
+                height: 280px;
+                border-radius: 50%;
+                border: 2px dashed var(--border-light);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                transition: all 0.4s ease;
+                background: radial-gradient(circle, var(--bg-surface) 0%, transparent 70%);
+                cursor: pointer;
+                position: relative;
+                z-index: 10;
+            }
+
+            .portal-zone:hover,
+            .portal-zone.dragover {
+                border-color: var(--accent);
+                box-shadow: 0 0 30px var(--accent-glow);
+                transform: scale(1.05);
+            }
+
+            .portal-ring {
+                position: absolute;
+                inset: -10px;
+                border-radius: 50%;
+                border: 1px solid var(--accent);
+                opacity: 0.3;
+                animation: spin 10s linear infinite;
+                pointer-events: none;
+            }
+
+            @keyframes spin {
+                from {
+                    transform: rotate(0deg);
+                }
+
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* Transfer List (Bottom Sheet style on mobile, Sidebar on desktop) */
+            .transfers-panel {
+                width: 100%;
+                max-width: 800px;
+                margin-top: 2rem;
+            }
+
+            .file-card-modern {
+                background: var(--bg-surface);
+                border-radius: 16px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                border: 1px solid var(--border-light);
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .progress-bg {
+                position: absolute;
+                left: 0;
+                bottom: 0;
+                height: 3px;
+                background: var(--accent);
+                transition: width 0.3s;
+            }
+
+            /* Stats Floating Pill */
+            .stats-floater {
+                position: fixed;
+                bottom: 2rem;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(15, 23, 42, 0.8);
+                backdrop-filter: blur(12px);
+                padding: 0.75rem 1.5rem;
+                border-radius: 50px;
+                display: flex;
+                gap: 1.5rem;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: white;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+                z-index: 100;
+            }
+
+            .stat-mini {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                line-height: 1;
+            }
+
+            .stat-mini-val {
+                font-weight: bold;
+                font-size: 0.9rem;
+            }
+
+            .stat-mini-lbl {
+                font-size: 0.6rem;
+                opacity: 0.7;
+                text-transform: uppercase;
+                margin-top: 2px;
+            }
+
+            /* Mobile Responsive */
+            @media (max-width: 768px) {
+                .portal-zone {
+                    width: 220px;
+                    height: 220px;
+                }
+
+                .dashboard-header {
+                    padding: 0.75rem 1rem;
+                }
+
+                .btn-icon-text span {
+                    display: none;
+                }
+
+                /* Hide text on mobile buttons */
+                .stats-floater {
+                    width: 90%;
+                    justify-content: space-around;
+                    bottom: 1rem;
+                }
+            }
+        </style>
+
+        <!-- ==================== ROOM SCREEN (REDESIGNED) ==================== -->
+        <div id="roomScreen" style="display: none; height: 100vh; flex-direction: column; background: var(--bg-main);">
+
+            <!-- Header -->
+            <header class="dashboard-header">
+                <a href="/" class="logo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                         <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
                     </svg>
-                    Velo
+                    <span style="font-weight: 700; margin-left: 0.5rem;">Velo</span>
                 </a>
 
-                <div class="room-badge">
-                    <span style="color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Your ID</span>
-                    <span class="room-code" id="myPeerId">------</span>
-                    <button class="copy-btn" id="copyPeerId" title="Copy ID">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                        </svg>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn-ghost btn-icon-text" id="copyPeerId"
+                        style="padding: 0.5rem 1rem; border-radius: 50px;">
+                        <span>ID: </span><b id="myPeerId" style="margin: 0 0.5rem;">...</b> 📋
                     </button>
-                    <button class="copy-btn" id="showQrBtn" title="Show QR Code">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <button class="btn-ghost" id="showQrBtn"
+                        style="width: 40px; height: 40px; padding: 0; border-radius: 50%;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <rect x="3" y="3" width="7" height="7" />
                             <rect x="14" y="3" width="7" height="7" />
@@ -535,150 +742,94 @@
                             <rect x="3" y="14" width="7" height="7" />
                         </svg>
                     </button>
-                </div>
-
-                <div class="live-stats-bar">
-                    <div class="live-stat">
-                        <div class="live-stat-icon">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                            </svg>
-                        </div>
-                        <div>
-                            <div class="live-stat-value" id="liveSpeed">0 MB/s</div>
-                            <div class="live-stat-label">Speed</div>
-                        </div>
-
-                    </div>
-                    <div class="live-stat">
-                        <div class="live-stat-icon" style="background: var(--accent-glow); color: var(--accent);">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                                <polyline points="17 6 23 6 23 12" />
-                            </svg>
-                        </div>
-                        <div>
-                            <div class="live-stat-value" id="peakSpeedStat">0 MB/s</div>
-                            <div class="live-stat-label">Peak</div>
-                        </div>
-                    </div>
-                    <div class="live-stat">
-                        <div class="live-stat-icon" style="background: rgba(251, 191, 36, 0.15); color: #FBBF24;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path
-                                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                            </svg>
-                        </div>
-                        <div>
-                            <div class="live-stat-value" id="totalTransferred">0 B</div>
-                            <div class="live-stat-label">Total</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="stats-group">
-                    <div class="stat-item">
-                        <div class="stat-value"><span class="status-dot" id="connectionDot"></span><span
-                                id="connectionStatus">Disconnected</span></div>
-                        <div class="stat-label">Status</div>
-                    </div>
-                    <button id="disconnectBtn" class="btn-ghost"
-                        style="padding: 0.5rem 1rem; color: var(--danger); border-color: var(--danger);">
-                        Disconnect
+                    <button class="btn-ghost" id="disconnectBtn"
+                        style="color: var(--danger); border-color: var(--danger); border-radius: 50px; padding: 0.5rem 1rem;">
+                        ✕ <span class="desktop-only">Leave</span>
                     </button>
                 </div>
             </header>
 
-            <!-- Main Content -->
-            <div class="main-content">
+            <!-- Peer Bar -->
+            <div class="peer-bar" id="peerList">
+                <div class="peer-pill">
+                    <div class="peer-pill-avatar">?</div>
+                    <span>Waiting for peers...</span>
+                </div>
+            </div>
 
-                <!-- Sidebar: Peers -->
-                <aside class="sidebar">
-                    <div class="sidebar-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="9" cy="7" r="4" />
-                        </svg>
-                        Connected Peers
-                    </div>
-                    <ul class="peer-list" id="peerList">
-                        <li style="color: var(--text-muted); font-size: 0.9rem;">No peers connected yet.</li>
-                    </ul>
+            <!-- Main Stage -->
+            <div class="main-stage">
 
-                    <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border-light);">
-                        <div class="sidebar-title">Add Peer</div>
-                        <input type="text" id="addPeerInput" class="input-field" placeholder="Enter Peer ID"
-                            style="margin-bottom: 0.5rem; font-size: 0.9rem; padding: 0.75rem;">
-                        <button class="btn-primary" style="width: 100%; justify-content: center; padding: 0.6rem;"
-                            id="addPeerBtn">Connect</button>
-                    </div>
-                </aside>
+                <!-- Portal Drop -->
+                <div class="portal-zone" id="dropZone">
+                    <div class="portal-ring"></div>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                        style="margin-bottom: 1rem; color: var(--accent);">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    <h3 style="margin: 0;">Tap to Send</h3>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem;">or drag files here</p>
+                    <input type="file" id="fileInput" multiple hidden>
+                </div>
 
-                <!-- Main Transfer Area -->
-                <main class="transfer-zone">
+                <!-- Transfer Queue -->
+                <div class="transfers-panel" id="transferQueue">
+                    <!-- Transfers appear here -->
+                </div>
 
-                    <!-- Giant Drop Zone -->
-                    <div class="mega-drop" id="dropZone">
-                        <svg class="mega-drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.5">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="17 8 12 3 7 8" />
-                            <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        <h2>Drop files here</h2>
-                        <p>or click to browse</p>
-                        <input type="file" id="fileInput" multiple hidden>
-                    </div>
+            </div>
 
-                    <!-- Transfer Queue -->
-                    <section class="queue-section">
-                        <div class="queue-header">
-                            <span class="queue-title">Transfers</span>
-                        </div>
-                        <div id="transferQueue">
-                            <!-- File items render here -->
-                        </div>
-                    </section>
-                </main>
+            <!-- Floating Stats -->
+            <div class="stats-floater">
+                <div class="stat-mini">
+                    <span class="stat-mini-val" id="liveSpeed">0 MB/s</span>
+                    <span class="stat-mini-lbl">Speed</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-val" id="peakSpeedStat">0 MB/s</span>
+                    <span class="stat-mini-lbl">Peak</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-val" id="connectionStatus">Ready</span>
+                    <span class="stat-mini-lbl">Status</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Toast Container -->
+        <div id="toastContainer"
+            style="position: fixed; bottom: 2rem; right: 2rem; display: flex; flex-direction: column; gap: 0.75rem; z-index: 300;">
+        </div>
+
+        <!-- QR Modal -->
+        <div id="qrModal"
+            style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); align-items: center; justify-content: center; z-index: 200;">
+            <div class="transfer-card"
+                style="width: 100%; max-width: 350px; position: relative; text-align: center; padding: 2.5rem; background: var(--bg-surface); border: 1px solid var(--border-light); border-radius: 24px;">
+                <button id="closeQrModal"
+                    style="position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; color: var(--text-muted); cursor: pointer;">&times;</button>
+                <h2 style="margin-bottom: 2rem;">Scan to Connect</h2>
+                <div id="qrCodeContainer"
+                    style="display: flex; justify-content: center; margin-bottom: 1.5rem; padding: 1rem; background: white; border-radius: 12px; width: fit-content; margin-left: auto; margin-right: auto;">
+                </div>
+                <p style="color: var(--text-muted);">Scan this with another Velo device to connect
+                    instantly.</p>
             </div>
         </div>
-    </div>
 
-    <!-- Toast Container -->
-    <div id="toastContainer"
-        style="position: fixed; bottom: 2rem; right: 2rem; display: flex; flex-direction: column; gap: 0.75rem; z-index: 300;">
-    </div>
+        <!-- PeerJS Library -->
+        <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+        <!-- QR Code Library -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
-    <!-- QR Modal -->
-    <div id="qrModal"
-        style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); align-items: center; justify-content: center; z-index: 200;">
-        <div class="transfer-card"
-            style="width: 100%; max-width: 350px; position: relative; text-align: center; padding: 2.5rem; background: var(--bg-surface); border: 1px solid var(--border-light); border-radius: 24px;">
-            <button id="closeQrModal"
-                style="position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; color: var(--text-muted); cursor: pointer;">&times;</button>
-            <h2 style="margin-bottom: 2rem;">Scan to Connect</h2>
-            <div id="qrCodeContainer"
-                style="display: flex; justify-content: center; margin-bottom: 1.5rem; padding: 1rem; background: white; border-radius: 12px; width: fit-content; margin-left: auto; margin-right: auto;">
-            </div>
-            <p style="color: var(--text-muted);">Scan this with another Velo device to connect
-                instantly.</p>
-        </div>
-    </div>
+        <!-- Theme -->
+        <script src="js/theme.js"></script>
 
-    <!-- PeerJS Library -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <!-- QR Code Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
-    <!-- Theme -->
-    <script src="js/theme.js"></script>
-
-    <!-- Main App Logic -->
-    <script src="js/velo-app.js"></script>
+        <!-- Main App Logic -->
+        <script src="js/velo-app.js"></script>
 </body>
 
 </html>

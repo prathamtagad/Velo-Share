@@ -46,12 +46,9 @@ class VeloApp {
         // Room
         this.myPeerIdDisplay = document.getElementById('myPeerId');
         this.copyPeerIdBtn = document.getElementById('copyPeerId');
-        this.connectionDot = document.getElementById('connectionDot');
         this.connectionStatus = document.getElementById('connectionStatus');
         this.disconnectBtn = document.getElementById('disconnectBtn');
         this.peerList = document.getElementById('peerList');
-        this.addPeerInput = document.getElementById('addPeerInput');
-        this.addPeerBtn = document.getElementById('addPeerBtn');
 
         // Stats
         this.liveSpeedEl = document.getElementById('liveSpeed');
@@ -90,20 +87,6 @@ class VeloApp {
         });
 
         this.disconnectBtn.addEventListener('click', () => this.disconnect());
-
-        this.addPeerBtn.addEventListener('click', () => {
-            const peerId = this.addPeerInput.value.trim().toUpperCase();
-            if (peerId) {
-                this.connectToPeer(peerId);
-                this.addPeerInput.value = '';
-            }
-        });
-
-        this.addPeerInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.addPeerBtn.click();
-            }
-        });
 
         // File transfer
         this.dropZone.addEventListener('click', () => this.fileInput.click());
@@ -382,40 +365,51 @@ class VeloApp {
     }
 
     updateStatus(status) {
+        if (!this.connectionStatus) return;
         switch (status) {
             case 'connected':
-                this.connectionDot.classList.add('connected');
-                this.connectionStatus.textContent = `${this.connections.size} peer(s)`;
+                this.connectionStatus.textContent = `${this.connections.size} Peer(s)`;
+                this.connectionStatus.style.color = 'var(--accent)';
                 break;
             case 'ready':
-                this.connectionDot.classList.remove('connected');
-                this.connectionStatus.textContent = 'Waiting...';
+                this.connectionStatus.textContent = 'Ready';
+                this.connectionStatus.style.color = 'var(--text-muted)';
                 break;
             case 'disconnected':
-                this.connectionDot.classList.remove('connected');
                 this.connectionStatus.textContent = 'Disconnected';
+                this.connectionStatus.style.color = 'var(--danger)';
                 break;
         }
     }
 
     updatePeerList() {
-        if (this.connections.size === 0) {
-            this.peerList.innerHTML = '<li style="color: var(--text-muted); font-size: 0.9rem;">No peers connected yet.</li>';
-            return;
-        }
-
         this.peerList.innerHTML = '';
+
+        // Add "Add Peer" button first
+        const addBtn = document.createElement('div');
+        addBtn.className = 'peer-pill';
+        addBtn.style.cursor = 'pointer';
+        addBtn.innerHTML = `
+            <div class="peer-pill-avatar" style="background: var(--bg-surface); border: 1px dashed var(--text-muted); color: var(--text-muted);">+</div>
+            <span>Add</span>
+        `;
+        addBtn.onclick = () => {
+            const id = prompt('Enter Peer ID to connect:');
+            if (id) this.connectToPeer(id.toUpperCase());
+        };
+        this.peerList.appendChild(addBtn);
+
         this.connections.forEach(({ username }, peerId) => {
-            const li = document.createElement('li');
-            li.className = 'peer-card connected';
-            li.innerHTML = `
-                <div class="peer-avatar">${username.charAt(0).toUpperCase()}</div>
+            const pill = document.createElement('div');
+            pill.className = 'peer-pill active';
+            pill.innerHTML = `
+                <div class="peer-pill-avatar">${username.charAt(0).toUpperCase()}</div>
                 <div>
-                    <div class="peer-name">${username}</div>
-                    <div class="peer-status">${peerId}</div>
+                    <div style="font-weight: 600; line-height: 1;">${username}</div>
+                    <div style="font-size: 0.7rem; opacity: 0.7;">${peerId}</div>
                 </div>
             `;
-            this.peerList.appendChild(li);
+            this.peerList.appendChild(pill);
         });
     }
 
@@ -666,85 +660,54 @@ class VeloApp {
     // ==================== TRANSFER UI ====================
 
     addTransferToUI(id, name, size, direction) {
-        const iconPath = direction === 'receive'
-            ? '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'
-            : '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>';
-
-        const dirLabel = direction === 'receive' ? '↓ Receiving' : '↑ Sending';
-        const dirColor = direction === 'receive' ? 'var(--accent)' : 'var(--primary)';
-
         const item = document.createElement('div');
-        item.className = 'file-item';
+        item.className = 'file-card-modern';
         item.id = `transfer-${id}`;
+
+        const iconColor = direction === 'receive' ? 'var(--accent)' : 'var(--primary)';
+        const iconSvg = direction === 'receive'
+            ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+            : '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+
         item.innerHTML = `
-            <div class="file-icon" style="color: ${dirColor};">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    ${iconPath}
-                </svg>
-            </div>
-            <div class="file-info">
-                <div class="file-name">${name}</div>
-                <div class="file-meta">
-                    <span style="color: ${dirColor};">${dirLabel}</span> • ${this.formatBytes(size)}
+            <div style="color: ${iconColor}; background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 8px;">${iconSvg}</div>
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${name}</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 0.5rem;">
+                    <span>${this.formatBytes(size)}</span>
+                    <span id="speed-${id}" style="color: ${iconColor}"></span>
                 </div>
             </div>
-            <div class="file-stats">
-                <div class="file-speed" id="speed-${id}">0 MB/s</div>
-                <div class="file-eta" id="eta-${id}">Calculating...</div>
+            <div style="text-align: right;">
+                <div id="percent-${id}" style="font-weight: bold;">0%</div>
+                <div id="eta-${id}" style="font-size: 0.7rem; color: var(--text-muted);">--</div>
             </div>
-            <div class="file-progress-ring">
-                <div class="file-percent" id="percent-${id}">0%</div>
-            </div>
+            <div class="progress-bg" id="progress-${id}" style="width: 0%;"></div>
         `;
 
         this.transferQueue.insertBefore(item, this.transferQueue.firstChild);
     }
 
     updateTransferUI(id, progress) {
-        const item = document.getElementById(`transfer-${id}`);
+        const bar = document.getElementById(`progress-${id}`);
         const percent = document.getElementById(`percent-${id}`);
-
-        if (item) {
-            item.style.setProperty('--progress', `${progress * 100}%`);
-        }
-        if (percent) {
-            percent.textContent = `${Math.round(progress * 100)}%`;
-        }
+        if (bar) bar.style.width = `${progress * 100}%`;
+        if (percent) percent.textContent = `${Math.round(progress * 100)}%`;
     }
 
     completeTransferUI(id, size, startTime) {
-        const item = document.getElementById(`transfer-${id}`);
+        const bar = document.getElementById(`progress-${id}`);
         const percent = document.getElementById(`percent-${id}`);
-        const speedEl = document.getElementById(`speed-${id}`);
-        const etaEl = document.getElementById(`eta-${id}`);
+        const eta = document.getElementById(`eta-${id}`);
 
-        const elapsed = (Date.now() - startTime) / 1000;
-        const avgSpeed = size / elapsed;
+        if (bar) bar.style.width = '100%';
+        if (percent) { percent.textContent = '✓'; percent.style.color = 'var(--accent)'; }
+        if (eta) eta.textContent = 'Complete';
 
-        if (item) {
-            item.style.setProperty('--progress', '100%');
-            item.style.borderColor = 'var(--accent)';
-        }
-        if (percent) {
-            percent.textContent = '✓';
-            percent.style.color = 'var(--accent)';
-            percent.style.fontSize = '1.2rem';
-        }
-        if (speedEl) {
-            speedEl.textContent = `Avg: ${this.formatSpeed(avgSpeed)}`;
-            speedEl.style.color = 'var(--accent)';
-        }
-        if (etaEl) {
-            etaEl.textContent = `Done in ${elapsed.toFixed(1)}s`;
-        }
-
-        // Trigger effects
         this.triggerConfetti();
-
-        // Save history (we need transfer name, so we'll look it up from UI or pass it)
-        // For simplicity, let's just log it for now or implement full tracking lookup
-        // Ideally we should pass the full transfer object to completeTransferUI or save it before delete
     }
+
+
 
     // ==================== FORMATTERS ====================
 
