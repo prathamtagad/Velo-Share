@@ -148,6 +148,7 @@ class VeloApp {
         }
 
         this.myUsername = username;
+        this.saveProfile();
         this.isHost = true;
         this.initPeer();
     }
@@ -166,6 +167,7 @@ class VeloApp {
         }
 
         this.myUsername = username;
+        this.saveProfile();
         this.isHost = false;
         this.initPeer(targetPeerId);
     }
@@ -718,6 +720,37 @@ class VeloApp {
 
     // ==================== NEW FEATURES ====================
 
+    checkUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        const joinId = params.get('join');
+        if (joinId) {
+            // Fill ID
+            if (this.peerIdInput) {
+                this.peerIdInput.value = joinId;
+                this.peerIdInput.style.borderColor = 'var(--accent)';
+            }
+            // Focus name or auto-join if name exists
+            if (this.joinNameInput.value) {
+                this.showToast(`Ready to join ${joinId}`, 'info');
+            } else {
+                this.joinNameInput.focus();
+                this.showToast('Enter name to join session', 'info');
+            }
+        }
+    }
+
+    saveProfile() {
+        localStorage.setItem('velo_username', this.myUsername);
+    }
+
+    loadProfile() {
+        const savedName = localStorage.getItem('velo_username');
+        if (savedName) {
+            if (this.hostNameInput) this.hostNameInput.value = savedName;
+            if (this.joinNameInput) this.joinNameInput.value = savedName;
+        }
+    }
+
     initNewFeatures() {
         // 1. Service Worker for PWA
         if ('serviceWorker' in navigator) {
@@ -729,8 +762,9 @@ class VeloApp {
         // 2. Audio Context for Sounds
         this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-        // 3. Load History
+        // 3. Load History & Profile
         this.loadHistory();
+        this.loadProfile();
 
         // 4. Keyboard Shortcuts
         document.addEventListener('keydown', (e) => {
@@ -742,6 +776,9 @@ class VeloApp {
         if (qrBtn) {
             qrBtn.addEventListener('click', () => this.showQrCode());
         }
+
+        // 6. Check URL Params (QR Code join)
+        this.checkUrlParams();
     }
 
     playSound(type) {
