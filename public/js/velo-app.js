@@ -25,7 +25,7 @@ class VeloApp {
         // Speed calculation interval
         this.speedInterval = null;
 
-        // ============ NEW FEATURES ============
+        // ============ NEW FEATURES =============
 
         // Queue Management
         this.queuedFiles = []; // Array of { id, file, status, priority }
