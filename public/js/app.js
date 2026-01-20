@@ -199,14 +199,13 @@ class PyShareApp {
             const isConnected = isMe || this.webrtc.isConnected(user.id);
 
             const li = document.createElement('li');
-            li.className = `peer-item ${isConnected ? 'connected' : ''}`;
+            li.className = `peer-card ${isConnected ? 'connected' : ''}`;
             li.innerHTML = `
                 <div class="peer-avatar">${user.username.charAt(0).toUpperCase()}</div>
-                <div style="flex: 1;">
-                    <span style="display: block; font-weight: 500;">${user.username} ${isMe ? '(You)' : ''}</span>
-                    <span style="font-size: 0.8rem; color: var(--text-muted);">${isConnected ? 'Connected' : 'Connecting...'}</span>
+                <div>
+                    <div class="peer-name">${user.username}${isMe ? ' (You)' : ''}</div>
+                    <div class="peer-status">${isConnected ? 'Connected' : 'Connecting...'}</div>
                 </div>
-                ${isConnected ? '<span style="color: var(--accent);">●</span>' : ''}
             `;
             this.elements.usersList.appendChild(li);
         });
@@ -418,41 +417,29 @@ class PyShareApp {
         const empty = this.elements.queueList.querySelector('.queue-empty');
         if (empty) empty.remove();
 
-        const direction = transfer.direction === 'receive' ? '↓' : '↑';
-        // Note: New design doesn't specifically need 'receiving'/'sending' class on the container as much, 
-        // but we'll keep the IDs for updates.
-
-        const item = document.createElement('div');
-        item.className = 'file-card-modern';
-        item.id = `transfer-${transfer.id}`;
-
-        // Icon depends on file type or direction
         const iconPath = transfer.direction === 'receive'
             ? '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'
             : '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>';
 
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        item.id = `transfer-${transfer.id}`;
+
         item.innerHTML = `
-            <div class="progress-bg">
-                <div class="progress-fill" id="progress-${transfer.id}"></div>
-            </div>
-            
-            <div class="file-icon-box">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <div class="file-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     ${iconPath}
                 </svg>
             </div>
-            
-            <div class="file-details">
-                <span class="file-name">${transfer.name}</span>
+            <div class="file-info">
+                <div class="file-name">${transfer.name}</div>
                 <div class="file-meta">
-                    <span id="status-${transfer.id}">Waiting...</span>
-                    <span>${this.transfer.formatBytes(transfer.size)}</span>
+                    <span id="status-${transfer.id}">${transfer.direction === 'receive' ? 'Receiving' : 'Sending'}...</span> • ${this.transfer.formatBytes(transfer.size)}
                 </div>
             </div>
-            
-            <div style="text-align: right;">
-                <div style="font-weight: 600;" id="percent-${transfer.id}">0%</div>
-                <div style="font-size: 0.8rem; color: var(--text-muted);" id="speed-${transfer.id}">0 MB/s</div>
+            <div class="file-progress">
+                <div class="file-percent" id="percent-${transfer.id}">0%</div>
+                <div class="file-speed" id="speed-${transfer.id}">0 MB/s</div>
             </div>
         `;
 
@@ -460,13 +447,13 @@ class PyShareApp {
     }
 
     updateTransferProgress(transfer, progress) {
-        const progressBar = document.getElementById(`progress-${transfer.id}`);
+        const item = document.getElementById(`transfer-${transfer.id}`);
         const percentEl = document.getElementById(`percent-${transfer.id}`);
         const statusEl = document.getElementById(`status-${transfer.id}`);
         const speedEl = document.getElementById(`speed-${transfer.id}`);
 
-        if (progressBar) {
-            progressBar.style.width = `${progress * 100}%`;
+        if (item) {
+            item.style.setProperty('--progress', `${progress * 100}%`);
         }
         if (percentEl) {
             percentEl.textContent = `${Math.round(progress * 100)}%`;
@@ -482,17 +469,18 @@ class PyShareApp {
     }
 
     markTransferComplete(transfer) {
-        const progressBar = document.getElementById(`progress-${transfer.id}`);
+        const item = document.getElementById(`transfer-${transfer.id}`);
         const percentEl = document.getElementById(`percent-${transfer.id}`);
         const statusEl = document.getElementById(`status-${transfer.id}`);
         const speedEl = document.getElementById(`speed-${transfer.id}`);
 
-        if (progressBar) {
-            progressBar.style.width = '100%';
-            progressBar.style.background = 'var(--accent-success)';
+        if (item) {
+            item.style.setProperty('--progress', '100%');
+            item.style.borderColor = 'var(--accent)';
         }
         if (percentEl) {
             percentEl.textContent = '100%';
+            percentEl.style.color = 'var(--accent)';
         }
         if (statusEl) {
             statusEl.textContent = 'Complete ✓';
