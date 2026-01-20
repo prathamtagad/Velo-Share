@@ -464,7 +464,7 @@ class VeloApp {
 
     sendFile(file) {
         const id = ++this.transferId;
-        const chunkSize = 64 * 1024; // 64KB chunks
+        const chunkSize = 256 * 1024; // Increased to 256KB for speed
         const now = Date.now();
 
         // Track this transfer
@@ -489,11 +489,25 @@ class VeloApp {
             });
         });
 
-        // Read and send file
         const reader = new FileReader();
         let offset = 0;
 
-        const readNextChunk = () => {
+        // Backpressure flow control
+        const sendNextChunk = () => {
+            // Check potential backpressure (sum of bufferedAmount of all connections)
+            let totalBufferedAmount = 0;
+            for (const { conn } of this.connections.values()) {
+                if (conn.dataChannel) {
+                    totalBufferedAmount += conn.dataChannel.bufferedAmount || 0;
+                }
+            }
+
+            // If buffer is too full (> 16MB), wait to drain
+            if (totalBufferedAmount > 16 * 1024 * 1024) {
+                setTimeout(sendNextChunk, 50);
+                return;
+            }
+
             const slice = file.slice(offset, offset + chunkSize);
             reader.readAsArrayBuffer(slice);
         };
@@ -502,6 +516,8 @@ class VeloApp {
             const chunk = e.target.result;
 
             this.connections.forEach(({ conn }) => {
+                // We send as object, which adds overhead but keeps protocol simple.
+                // PeerJS binarypack will serialize this.
                 conn.send({
                     type: 'file-chunk',
                     id,
@@ -519,13 +535,20 @@ class VeloApp {
             }
 
             const progress = offset / file.size;
-            this.updateTransferUI(id, progress);
+
+            // Throttle UI updates to every 1% or 200ms
+            if (progress - (transfer.lastUiProgress || 0) > 0.01 || Date.now() - transfer.lastUiUpdate > 200) {
+                this.updateTransferUI(id, progress);
+                transfer.lastUiProgress = progress;
+                transfer.lastUiUpdate = Date.now();
+            }
 
             if (offset < file.size) {
-                // Use setTimeout to prevent blocking
-                setTimeout(readNextChunk, 0);
+                // Immediately try next chunk, rely on bufferedAmount check at start of sendNextChunk
+                sendNextChunk();
             } else {
                 // Done
+                this.updateTransferUI(id, 1); // Ensure 100% shown
                 this.connections.forEach(({ conn }) => {
                     conn.send({
                         type: 'file-end',
@@ -539,7 +562,7 @@ class VeloApp {
             }
         };
 
-        readNextChunk();
+        sendNextChunk();
     }
 
     receiveFileStart(peerId, data) {
