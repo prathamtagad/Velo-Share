@@ -1,6 +1,7 @@
 /**
  * Velo - P2P File Transfer (PeerJS Edition)
  * Static deployment compatible - No server required!
+ * Enhanced with live speed & ETA tracking
  */
 
 class VeloApp {
@@ -13,12 +14,16 @@ class VeloApp {
 
         // Transfer tracking
         this.transfers = new Map();
+        this.activeTransfers = new Map(); // id -> { size, transferred, startTime, lastUpdate, lastBytes }
         this.transferId = 0;
 
-        // Speed tracking
-        this.bytesTransferred = 0;
-        this.lastSpeedCheck = Date.now();
-        this.currentSpeed = 0;
+        // Global stats
+        this.totalBytesTransferred = 0;
+        this.sessionStartTime = null;
+        this.peakSpeed = 0;
+
+        // Speed calculation interval
+        this.speedInterval = null;
 
         this.initElements();
         this.bindEvents();
@@ -47,6 +52,11 @@ class VeloApp {
         this.peerList = document.getElementById('peerList');
         this.addPeerInput = document.getElementById('addPeerInput');
         this.addPeerBtn = document.getElementById('addPeerBtn');
+
+        // Stats
+        this.liveSpeedEl = document.getElementById('liveSpeed');
+        this.peakSpeedEl = document.getElementById('peakSpeedStat');
+        this.totalTransferredEl = document.getElementById('totalTransferred');
 
         // Transfer
         this.dropZone = document.getElementById('dropZone');
@@ -173,6 +183,8 @@ class VeloApp {
             this.showRoomScreen();
             this.updateStatus('ready');
             this.showToast(`Your ID: ${id}`, 'success');
+            this.sessionStartTime = Date.now();
+            this.startSpeedTracking();
 
             // If joining, connect to target
             if (targetPeerId) {
@@ -250,7 +262,6 @@ class VeloApp {
     handleData(peerId, data) {
         switch (data.type) {
             case 'handshake':
-                // Update peer's username
                 const peerInfo = this.connections.get(peerId);
                 if (peerInfo) {
                     peerInfo.username = data.username;
@@ -273,6 +284,7 @@ class VeloApp {
     }
 
     disconnect() {
+        this.stopSpeedTracking();
         this.connections.forEach(({ conn }) => conn.close());
         this.connections.clear();
 
@@ -282,6 +294,71 @@ class VeloApp {
         }
 
         this.showLandingScreen();
+    }
+
+    // ==================== SPEED TRACKING ====================
+
+    startSpeedTracking() {
+        this.speedInterval = setInterval(() => {
+            this.updateGlobalStats();
+        }, 500);
+    }
+
+    stopSpeedTracking() {
+        if (this.speedInterval) {
+            clearInterval(this.speedInterval);
+            this.speedInterval = null;
+        }
+    }
+
+    updateGlobalStats() {
+        // Calculate current speed from active transfers
+        let totalSpeed = 0;
+        const now = Date.now();
+
+        this.activeTransfers.forEach((transfer, id) => {
+            const elapsed = (now - transfer.lastUpdate) / 1000;
+            if (elapsed > 0 && elapsed < 2) {
+                const bytesPerSec = (transfer.transferred - transfer.lastBytes) / elapsed;
+                totalSpeed += bytesPerSec;
+                transfer.lastBytes = transfer.transferred;
+                transfer.lastUpdate = now;
+
+                // Update individual transfer speed and ETA
+                this.updateTransferStats(id, transfer, bytesPerSec);
+            }
+        });
+
+        // Update peak
+        if (totalSpeed > this.peakSpeed) {
+            this.peakSpeed = totalSpeed;
+        }
+
+        // Update UI
+        if (this.liveSpeedEl) {
+            this.liveSpeedEl.textContent = this.formatSpeed(totalSpeed);
+        }
+        if (this.peakSpeedEl) {
+            this.peakSpeedEl.textContent = this.formatSpeed(this.peakSpeed);
+        }
+        if (this.totalTransferredEl) {
+            this.totalTransferredEl.textContent = this.formatBytes(this.totalBytesTransferred);
+        }
+    }
+
+    updateTransferStats(id, transfer, speed) {
+        const speedEl = document.getElementById(`speed-${id}`);
+        const etaEl = document.getElementById(`eta-${id}`);
+
+        if (speedEl) {
+            speedEl.textContent = this.formatSpeed(speed);
+        }
+
+        if (etaEl && speed > 0) {
+            const remaining = transfer.size - transfer.transferred;
+            const seconds = remaining / speed;
+            etaEl.textContent = this.formatTime(seconds);
+        }
     }
 
     // ==================== UI ====================
@@ -385,6 +462,16 @@ class VeloApp {
     sendFile(file) {
         const id = ++this.transferId;
         const chunkSize = 64 * 1024; // 64KB chunks
+        const now = Date.now();
+
+        // Track this transfer
+        this.activeTransfers.set(id, {
+            size: file.size,
+            transferred: 0,
+            startTime: now,
+            lastUpdate: now,
+            lastBytes: 0
+        });
 
         // Add to UI
         this.addTransferToUI(id, file.name, file.size, 'send');
@@ -420,13 +507,20 @@ class VeloApp {
             });
 
             offset += chunk.byteLength;
-            this.bytesTransferred += chunk.byteLength;
+            this.totalBytesTransferred += chunk.byteLength;
+
+            // Update active transfer tracking
+            const transfer = this.activeTransfers.get(id);
+            if (transfer) {
+                transfer.transferred = offset;
+            }
 
             const progress = offset / file.size;
             this.updateTransferUI(id, progress);
 
             if (offset < file.size) {
-                readNextChunk();
+                // Use setTimeout to prevent blocking
+                setTimeout(readNextChunk, 0);
             } else {
                 // Done
                 this.connections.forEach(({ conn }) => {
@@ -435,7 +529,8 @@ class VeloApp {
                         id
                     });
                 });
-                this.completeTransferUI(id);
+                this.activeTransfers.delete(id);
+                this.completeTransferUI(id, file.size, now);
                 this.showToast(`Sent: ${file.name}`, 'success');
             }
         };
@@ -444,11 +539,21 @@ class VeloApp {
     }
 
     receiveFileStart(peerId, data) {
+        const now = Date.now();
+
         this.transfers.set(data.id, {
             name: data.name,
             size: data.size,
             chunks: [],
             received: 0
+        });
+
+        this.activeTransfers.set(data.id, {
+            size: data.size,
+            transferred: 0,
+            startTime: now,
+            lastUpdate: now,
+            lastBytes: 0
         });
 
         this.addTransferToUI(data.id, data.name, data.size, 'receive');
@@ -460,7 +565,13 @@ class VeloApp {
 
         transfer.chunks.push(data.data);
         transfer.received += data.data.byteLength;
-        this.bytesTransferred += data.data.byteLength;
+        this.totalBytesTransferred += data.data.byteLength;
+
+        // Update active transfer tracking
+        const activeTransfer = this.activeTransfers.get(data.id);
+        if (activeTransfer) {
+            activeTransfer.transferred = transfer.received;
+        }
 
         const progress = transfer.received / transfer.size;
         this.updateTransferUI(data.id, progress);
@@ -468,7 +579,10 @@ class VeloApp {
 
     receiveFileEnd(peerId, data) {
         const transfer = this.transfers.get(data.id);
+        const activeTransfer = this.activeTransfers.get(data.id);
         if (!transfer) return;
+
+        const startTime = activeTransfer?.startTime || Date.now();
 
         // Combine chunks and download
         const blob = new Blob(transfer.chunks);
@@ -482,7 +596,8 @@ class VeloApp {
         URL.revokeObjectURL(url);
 
         this.transfers.delete(data.id);
-        this.completeTransferUI(data.id);
+        this.activeTransfers.delete(data.id);
+        this.completeTransferUI(data.id, transfer.size, startTime);
         this.showToast(`Received: ${transfer.name}`, 'success');
     }
 
@@ -493,20 +608,29 @@ class VeloApp {
             ? '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'
             : '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>';
 
+        const dirLabel = direction === 'receive' ? '↓ Receiving' : '↑ Sending';
+        const dirColor = direction === 'receive' ? 'var(--accent)' : 'var(--primary)';
+
         const item = document.createElement('div');
         item.className = 'file-item';
         item.id = `transfer-${id}`;
         item.innerHTML = `
-            <div class="file-icon">
+            <div class="file-icon" style="color: ${dirColor};">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     ${iconPath}
                 </svg>
             </div>
             <div class="file-info">
                 <div class="file-name">${name}</div>
-                <div class="file-meta">${direction === 'receive' ? 'Receiving' : 'Sending'}... • ${this.formatBytes(size)}</div>
+                <div class="file-meta">
+                    <span style="color: ${dirColor};">${dirLabel}</span> • ${this.formatBytes(size)}
+                </div>
             </div>
-            <div class="file-progress">
+            <div class="file-stats">
+                <div class="file-speed" id="speed-${id}">0 MB/s</div>
+                <div class="file-eta" id="eta-${id}">Calculating...</div>
+            </div>
+            <div class="file-progress-ring">
                 <div class="file-percent" id="percent-${id}">0%</div>
             </div>
         `;
@@ -526,9 +650,14 @@ class VeloApp {
         }
     }
 
-    completeTransferUI(id) {
+    completeTransferUI(id, size, startTime) {
         const item = document.getElementById(`transfer-${id}`);
         const percent = document.getElementById(`percent-${id}`);
+        const speedEl = document.getElementById(`speed-${id}`);
+        const etaEl = document.getElementById(`eta-${id}`);
+
+        const elapsed = (Date.now() - startTime) / 1000;
+        const avgSpeed = size / elapsed;
 
         if (item) {
             item.style.setProperty('--progress', '100%');
@@ -537,8 +666,18 @@ class VeloApp {
         if (percent) {
             percent.textContent = '✓';
             percent.style.color = 'var(--accent)';
+            percent.style.fontSize = '1.2rem';
+        }
+        if (speedEl) {
+            speedEl.textContent = `Avg: ${this.formatSpeed(avgSpeed)}`;
+            speedEl.style.color = 'var(--accent)';
+        }
+        if (etaEl) {
+            etaEl.textContent = `${elapsed.toFixed(1)}s`;
         }
     }
+
+    // ==================== FORMATTERS ====================
 
     formatBytes(bytes) {
         if (bytes === 0) return '0 B';
@@ -546,6 +685,25 @@ class VeloApp {
         const sizes = ['B', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    formatSpeed(bytesPerSec) {
+        if (bytesPerSec === 0) return '0 MB/s';
+        const mbps = bytesPerSec / (1024 * 1024);
+        if (mbps >= 1) {
+            return mbps.toFixed(1) + ' MB/s';
+        }
+        const kbps = bytesPerSec / 1024;
+        return kbps.toFixed(0) + ' KB/s';
+    }
+
+    formatTime(seconds) {
+        if (!isFinite(seconds) || seconds < 0) return '--';
+        if (seconds < 1) return '< 1s';
+        if (seconds < 60) return Math.round(seconds) + 's';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.round(seconds % 60);
+        return `${mins}m ${secs}s`;
     }
 }
 

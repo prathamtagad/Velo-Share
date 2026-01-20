@@ -301,19 +301,75 @@
             color: var(--text-muted);
         }
 
-        .file-progress {
+        .file-stats {
             text-align: right;
+            flex-shrink: 0;
+            min-width: 80px;
+        }
+
+        .file-speed {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--primary);
+        }
+
+        .file-eta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .file-progress-ring {
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-main);
+            border-radius: 50%;
             flex-shrink: 0;
         }
 
         .file-percent {
             font-weight: 700;
-            font-size: 1.1rem;
+            font-size: 0.9rem;
         }
 
-        .file-speed {
-            font-size: 0.75rem;
+        /* Live Stats Bar */
+        .live-stats-bar {
+            display: flex;
+            gap: 2rem;
+            background: var(--bg-surface);
+            padding: 0.75rem 1.5rem;
+            border-radius: 16px;
+            border: 1px solid var(--border-light);
+        }
+
+        .live-stat {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .live-stat-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--primary-glow);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+        }
+
+        .live-stat-value {
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .live-stat-label {
+            font-size: 0.7rem;
             color: var(--text-muted);
+            text-transform: uppercase;
         }
 
         /* Responsive */
@@ -460,6 +516,47 @@
                     <span style="color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Your ID</span>
                     <span class="room-code" id="myPeerId">------</span>
                     <button class="copy-btn" id="copyPeerId">Copy</button>
+                </div>
+
+                <div class="live-stats-bar">
+                    <div class="live-stat">
+                        <div class="live-stat-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="live-stat-value" id="liveSpeed">0 MB/s</div>
+                            <div class="live-stat-label">Speed</div>
+                        </div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="live-stat-icon" style="background: var(--accent-glow); color: var(--accent);">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                                <polyline points="17 6 23 6 23 12" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="live-stat-value" id="peakSpeedStat">0 MB/s</div>
+                            <div class="live-stat-label">Peak</div>
+                        </div>
+                    </div>
+                    <div class="live-stat">
+                        <div class="live-stat-icon" style="background: rgba(251, 191, 36, 0.15); color: #FBBF24;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="live-stat-value" id="totalTransferred">0 B</div>
+                            <div class="live-stat-label">Total</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="stats-group">
