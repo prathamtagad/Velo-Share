@@ -234,7 +234,7 @@ class VeloApp {
     setupConnection(conn) {
         conn.on('open', () => {
             const username = conn.metadata?.username || 'Peer';
-            this.connections.set(conn.peer, { conn, username });
+            this.connections.set(conn.peer, { conn, username, receivingId: null });
             this.updatePeerList();
             this.updateStatus('connected');
 
@@ -243,6 +243,9 @@ class VeloApp {
                 type: 'handshake',
                 username: this.myUsername
             });
+
+            // Process queue
+            this.processTransferQueue();
         });
 
         conn.on('data', (data) => {
@@ -263,6 +266,12 @@ class VeloApp {
     }
 
     handleData(peerId, data) {
+        // Handle Raw Binary Data (File Chunks)
+        if (data instanceof ArrayBuffer || data instanceof Uint8Array || data instanceof Blob) {
+            this.receiveFileChunkRaw(peerId, data);
+            return;
+        }
+
         switch (data.type) {
             case 'handshake':
                 const peerInfo = this.connections.get(peerId);
@@ -274,10 +283,6 @@ class VeloApp {
 
             case 'file-start':
                 this.receiveFileStart(peerId, data);
-                break;
-
-            case 'file-chunk':
-                this.receiveFileChunk(peerId, data);
                 break;
 
             case 'file-end':
@@ -458,13 +463,29 @@ class VeloApp {
         }
 
         Array.from(files).forEach(file => {
-            this.sendFile(file);
+            // Queue the file to be sent
+            this.queueFileForSending(file);
         });
     }
 
+    // Internal queue to enforce one-at-a-time sending per peer (crucial for raw streams)
+    queueFileForSending(file) {
+        if (!this.sendingQueue) this.sendingQueue = [];
+        this.sendingQueue.push(file);
+        this.processTransferQueue();
+    }
+
+    processTransferQueue() {
+        if (this.isSending || !this.sendingQueue || this.sendingQueue.length === 0) return;
+
+        const file = this.sendingQueue.shift();
+        this.sendFile(file);
+    }
+
     sendFile(file) {
+        this.isSending = true; // Lock
         const id = ++this.transferId;
-        const chunkSize = 256 * 1024; // Increased to 256KB for speed
+        const chunkSize = 512 * 1024; // 512KB for high speed
         const now = Date.now();
 
         // Track this transfer
@@ -473,13 +494,14 @@ class VeloApp {
             transferred: 0,
             startTime: now,
             lastUpdate: now,
-            lastBytes: 0
+            lastBytes: 0,
+            lastUiProgress: 0,
+            lastUiUpdate: 0
         });
 
-        // Add to UI
         this.addTransferToUI(id, file.name, file.size, 'send');
 
-        // Notify all peers
+        // 1. Send Control Header
         this.connections.forEach(({ conn }) => {
             conn.send({
                 type: 'file-start',
@@ -492,19 +514,17 @@ class VeloApp {
         const reader = new FileReader();
         let offset = 0;
 
-        // Backpressure flow control
         const sendNextChunk = () => {
-            // Check potential backpressure (sum of bufferedAmount of all connections)
-            let totalBufferedAmount = 0;
+            // Backpressure check
+            let totalBuffered = 0;
             for (const { conn } of this.connections.values()) {
                 if (conn.dataChannel) {
-                    totalBufferedAmount += conn.dataChannel.bufferedAmount || 0;
+                    totalBuffered += conn.dataChannel.bufferedAmount || 0;
                 }
             }
 
-            // If buffer is too full (> 16MB), wait to drain
-            if (totalBufferedAmount > 16 * 1024 * 1024) {
-                setTimeout(sendNextChunk, 50);
+            if (totalBuffered > 8 * 1024 * 1024) { // 8MB threshold
+                setTimeout(sendNextChunk, 10);
                 return;
             }
 
@@ -515,50 +535,43 @@ class VeloApp {
         reader.onload = (e) => {
             const chunk = e.target.result;
 
+            // 2. Send Raw Chunk (No wrapping)
             this.connections.forEach(({ conn }) => {
-                // We send as object, which adds overhead but keeps protocol simple.
-                // PeerJS binarypack will serialize this.
-                conn.send({
-                    type: 'file-chunk',
-                    id,
-                    data: chunk
-                });
+                conn.send(chunk);
             });
 
             offset += chunk.byteLength;
             this.totalBytesTransferred += chunk.byteLength;
 
-            // Update active transfer tracking
+            // UI Updates (Throttled)
             const transfer = this.activeTransfers.get(id);
             if (transfer) {
                 transfer.transferred = offset;
-            }
-
-            const progress = offset / file.size;
-
-            // Throttle UI updates to every 1% or 200ms
-            if (progress - (transfer.lastUiProgress || 0) > 0.01 || Date.now() - transfer.lastUiUpdate > 200) {
-                this.updateTransferUI(id, progress);
-                transfer.lastUiProgress = progress;
-                transfer.lastUiUpdate = Date.now();
+                const progress = offset / file.size;
+                if (progress - transfer.lastUiProgress > 0.02 || Date.now() - transfer.lastUiUpdate > 200) {
+                    this.updateTransferUI(id, progress);
+                    transfer.lastUiProgress = progress;
+                    transfer.lastUiUpdate = Date.now();
+                }
             }
 
             if (offset < file.size) {
-                // Immediately try next chunk, rely on bufferedAmount check at start of sendNextChunk
                 sendNextChunk();
             } else {
-                // Done
-                this.updateTransferUI(id, 1); // Ensure 100% shown
+                // 3. Send Control Footer
+                this.updateTransferUI(id, 1);
                 this.connections.forEach(({ conn }) => {
-                    conn.send({
-                        type: 'file-end',
-                        id
-                    });
+                    conn.send({ type: 'file-end', id });
                 });
+
                 this.activeTransfers.delete(id);
                 this.completeTransferUI(id, file.size, now);
                 this.saveHistory({ name: file.name, size: file.size, peer: 'Peers' }, 'send');
                 this.showToast(`Sent: ${file.name}`, 'success');
+
+                // Unlock and process next
+                this.isSending = false;
+                setTimeout(() => this.processTransferQueue(), 100);
             }
         };
 
@@ -567,6 +580,10 @@ class VeloApp {
 
     receiveFileStart(peerId, data) {
         const now = Date.now();
+
+        // Lock this peer to this file ID
+        const peerInfo = this.connections.get(peerId);
+        if (peerInfo) peerInfo.receivingId = data.id;
 
         this.transfers.set(data.id, {
             name: data.name,
@@ -586,25 +603,42 @@ class VeloApp {
         this.addTransferToUI(data.id, data.name, data.size, 'receive');
     }
 
-    receiveFileChunk(peerId, data) {
-        const transfer = this.transfers.get(data.id);
+    receiveFileChunkRaw(peerId, chunk) {
+        const peerInfo = this.connections.get(peerId);
+        if (!peerInfo || !peerInfo.receivingId) return; // Ignore stray binary data
+
+        const transferId = peerInfo.receivingId;
+        const transfer = this.transfers.get(transferId);
         if (!transfer) return;
 
-        transfer.chunks.push(data.data);
-        transfer.received += data.data.byteLength;
-        this.totalBytesTransferred += data.data.byteLength;
+        // PeerJS might give us Uint8Array or ArrayBuffer
+        const data = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
 
-        // Update active transfer tracking
-        const activeTransfer = this.activeTransfers.get(data.id);
+        transfer.chunks.push(data);
+        transfer.received += data.byteLength;
+        this.totalBytesTransferred += data.byteLength;
+
+        const activeTransfer = this.activeTransfers.get(transferId);
         if (activeTransfer) {
             activeTransfer.transferred = transfer.received;
-        }
 
-        const progress = transfer.received / transfer.size;
-        this.updateTransferUI(data.id, progress);
+            // Throttle UI on receiver too
+            const progress = transfer.received / transfer.size;
+            if (progress - (activeTransfer.lastUiProgress || 0) > 0.02 || Date.now() - activeTransfer.lastUiUpdate > 200) {
+                this.updateTransferUI(transferId, progress);
+                activeTransfer.lastUiProgress = progress;
+                activeTransfer.lastUiUpdate = Date.now();
+            }
+        }
     }
 
     receiveFileEnd(peerId, data) {
+        const peerInfo = this.connections.get(peerId);
+        if (peerInfo) peerInfo.receivingId = null; // Unlock peer
+
+        // Force 100% UI
+        this.updateTransferUI(data.id, 1);
+
         const transfer = this.transfers.get(data.id);
         const activeTransfer = this.activeTransfers.get(data.id);
         if (!transfer) return;
