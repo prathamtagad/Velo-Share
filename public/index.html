@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velo - Velocity. Simplicity. Privacy.</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <!-- Nav -->
+    <nav class="navbar animate-entrance">
+        <a href="/" class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" class="logo-svg">
+                <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
+            </svg>
+            Velo
+        </a>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <button class="theme-toggle" id="themeToggle" title="Switch Theme">
+                <!-- Sun Icon -->
+                <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" style="display:none">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <!-- Moon Icon -->
+                <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+            <a href="app.html" class="btn-primary">Launch App</a>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <main
+        style="min-height: 90vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2rem;">
+        <div style="max-width: 800px;">
+            <div class="animate-entrance delay-1">
+                <span
+                    style="font-family: var(--font-heading); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.9rem;">
+                    Peer-to-Peer Reimagined
+                </span>
+            </div>
+
+            <h1 class="animate-entrance delay-2"
+                style="font-size: clamp(3rem, 10vw, 6rem); line-height: 1; margin: 1rem 0 2rem;">
+                Move files at the<br>
+                <span class="text-gradient">Speed of Thought.</span>
+            </h1>
+
+            <p class="animate-entrance delay-3"
+                style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 3rem; max-width: 600px; margin-left: auto; margin-right: auto;">
+                No clouds. No limits. No footprints. Velo connects your devices directly for infinite transfer speed and
+                absolute privacy.
+            </p>
+
+            <div class="animate-entrance delay-3" style="display: flex; gap: 1rem; justify-content: center;">
+                <a href="app.html" class="btn-primary">Start Transfer</a>
+                <a href="#features" class="btn-ghost">How it works</a>
+            </div>
+        </div>
+    </main>
+
+    <!-- Features -->
+    <section id="features" style="padding: 6rem 2rem;">
+        <div
+            style="max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3rem;">
+            <!-- Feature 1 -->
+            <div class="transfer-card hover-lift">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">⚡</div>
+                <h3>Infinite Velocity</h3>
+                <p style="color: var(--text-secondary); margin-top: 1rem;">
+                    Bypassing servers means no bandwidth caps. Your transfer is only limited by your local network or
+                    internet connection.
+                </p>
+            </div>
+
+            <!-- Feature 2 -->
+            <div class="transfer-card hover-lift">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🛡️</div>
+                <h3>Absolute Privacy</h3>
+                <p style="color: var(--text-secondary); margin-top: 1rem;">
+                    We don't see your files. WebRTC establishes a direct, encrypted handshake between you and your peer.
+                    Use Velo with confidence.
+                </p>
+            </div>
+
+            <!-- Feature 3 -->
+            <div class="transfer-card hover-lift">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">💎</div>
+                <h3>Vibrant Design</h3>
+                <p style="color: var(--text-secondary); margin-top: 1rem;">
+                    A psychologically optimized interface designed to reduce stress and look beautiful in any
+                    environment.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div style="margin-bottom: 2rem;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" style="color: var(--primary);">
+                <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
+            </svg>
+        </div>
+        <div>
+            <a href="about.html">About</a>
+            <a href="privacy.html">Privacy</a>
+            <a href="terms.html">Terms</a>
+            <a href="https://github.com/pratham-jaiswal/py-share-v2" target="_blank">GitHub</a>
+        </div>
+        <p style="margin-top: 2rem; font-size: 0.9rem; color: var(--text-muted);">&copy; 2026 Velo P2P. Crafted for
+            speed.</p>
+    </footer>
+
+    <script src="js/theme.js"></script>
+    <script>
+        // Entrance animation trigger
+        document.querySelectorAll('.animate-entrance').forEach(el => {
+            el.style.opacity = '1';
+        });
+    </script>
+</body>
+
+</html>

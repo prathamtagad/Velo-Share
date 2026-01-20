@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - PyShare</title>
+    <meta name="robots" content="noindex">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .nav-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+        }
+
+        .legal-container {
+            max-width: 800px;
+            margin: 4rem auto;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        .legal-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .legal-title {
+            font-size: 3rem;
+            font-weight: 800;
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        h2 {
+            color: var(--text-primary);
+            margin-top: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        h3 {
+            color: var(--text-primary);
+            margin-top: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        p,
+        li {
+            margin-bottom: 1rem;
+            line-height: 1.7;
+        }
+
+        ul {
+            margin-left: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-animation">
+        <div class="grid-overlay"></div>
+    </div>
+
+    <nav style="padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto;">
+        <a href="/" style="text-decoration: none; display: inline-block;">
+            <div class="logo">
+                <span class="logo-text">Py<span class="highlight">Share</span></span>
+            </div>
+        </a>
+    </nav>
+
+    <div class="legal-container">
+        <header class="legal-header">
+            <h1 class="legal-title">Privacy Policy</h1>
+            <p>Last updated: January 2026</p>
+        </header>
+
+        <p>At PyShare, we believe in privacy by design. This policy outlines how we handle your data—or rather, how we
+            don't.</p>
+
+        <h2>1. The Short Version</h2>
+        <p>We do not store your files. We do not track your transfers. We do not sell your data. PyShare is a
+            peer-to-peer service, meaning files go directly from you to the recipient.</p>
+
+        <h2>2. Data We Collect</h2>
+        <p>We collect only the bare minimum technical data required to establish connections:</p>
+        <ul>
+            <li><strong>Temporary Signaling Data:</strong> To connect two peers, we must temporarily relay "signaling"
+                messages (SDP offers/answers, ICE candidates) via our server. These messages contain networking
+                information (like IP addresses) required for WebRTC. They are not stored and are discarded immediately
+                after relay.</li>
+            <li><strong>Room Metadata:</strong> We keep track of active room codes and the number of connected peers in
+                that room in-memory. This data is wiped when the room is destroyed.</li>
+        </ul>
+
+        <h2>3. File Storage</h2>
+        <p><strong>We do not store any files on our servers.</strong></p>
+        <p>Files are streamed directly from the sender's browser to the receiver's browser using WebRTC Data Channels.
+            Detailed file content never touches our infrastructure.</p>
+
+        <h2>4. Analytics</h2>
+        <p>We do not use third-party analytics trackers (like Google Analytics) or cookies on this site.</p>
+
+        <h2>5. Contact</h2>
+        <p>If you have any questions about this policy, please open an issue on our GitHub repository.</p>
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2026 PyShare. All rights reserved.</p>
+        <div style="margin-top: 1rem;">
+            <a href="/" class="nav-link" style="margin: 0 1rem;">Home</a>
+            <a href="terms.html" class="nav-link" style="margin: 0 1rem;">Terms</a>
+        </div>
+    </footer>
+</body>
+
+</html>

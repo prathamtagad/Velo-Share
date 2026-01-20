@@ -1,0 +1,22 @@
+{
+  "name": "velo-p2p",
+  "version": "2.0.0",
+  "description": "Velo - Infinite Speed P2P File Transfer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "p2p",
+    "file-transfer",
+    "webrtc",
+    "peer-to-peer"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  }
+}

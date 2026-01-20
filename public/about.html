@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Velo</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <nav class="navbar">
+        <a href="/" class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
+            </svg>
+            Velo
+        </a>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <button class="theme-toggle" id="themeToggle"></button>
+            <a href="app.html" class="btn-primary">Launch App</a>
+        </div>
+    </nav>
+
+    <main style="max-width: 800px; margin: 8rem auto; padding: 0 2rem;">
+        <h1 style="font-size: 3rem; margin-bottom: 2rem;">The Velo Mission</h1>
+        <p style="color: var(--text-secondary); font-size: 1.25rem; margin-bottom: 4rem;">
+            We believe that sharing something with the person next to you shouldn't involve a trip around the world.
+        </p>
+
+        <div class="transfer-card" style="text-align: left; margin-bottom: 4rem;">
+            <h2>Why we exist</h2>
+            <p style="margin-top: 1rem; color: var(--text-secondary);">
+                Cloud services are great for storage, but terrible for instant transfer. They impse limits, require
+                sign-ups, and track your data.
+                Velo was built to be the anti-cloud. We use <strong>WebRTC</strong> to create a direct data tunnel
+                between peers.
+            </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+            <div>
+                <h3>Values</h3>
+                <ul style="margin-top: 1rem; color: var(--text-secondary); line-height: 2;">
+                    <li>Speed above all else.</li>
+                    <li>Privacy by default.</li>
+                    <li>Zero friction.</li>
+                </ul>
+            </div>
+            <div>
+                <h3>Tech Stack</h3>
+                <ul style="margin-top: 1rem; color: var(--text-secondary); line-height: 2;">
+                    <li>Node.js & WebSocket (Signaling)</li>
+                    <li>WebRTC (Data Channels)</li>
+                    <li>Vanilla JS (Performance)</li>
+                </ul>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/theme.js"></script>
+</body>
+
+</html>
