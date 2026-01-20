@@ -6,6 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Velo - Instant P2P File Transfer</title>
     <link rel="stylesheet" href="css/style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#7C3AED">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
     <style>
         /* ========== APP SPECIFIC STYLES ========== */
         .app-container {
@@ -515,7 +518,22 @@
                 <div class="room-badge">
                     <span style="color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Your ID</span>
                     <span class="room-code" id="myPeerId">------</span>
-                    <button class="copy-btn" id="copyPeerId">Copy</button>
+                    <button class="copy-btn" id="copyPeerId" title="Copy ID">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                    </button>
+                    <button class="copy-btn" id="showQrBtn" title="Show QR Code">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7" />
+                            <rect x="14" y="3" width="7" height="7" />
+                            <rect x="14" y="14" width="7" height="7" />
+                            <rect x="3" y="14" width="7" height="7" />
+                        </svg>
+                    </button>
                 </div>
 
                 <div class="live-stats-bar">
@@ -529,6 +547,22 @@
                         <div>
                             <div class="live-stat-value" id="liveSpeed">0 MB/s</div>
                             <div class="live-stat-label">Speed</div>
+                        </div>
+
+                        <!-- QR Modal -->
+                        <div id="qrModal"
+                            style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); align-items: center; justify-content: center; z-index: 200;">
+                            <div class="transfer-card"
+                                style="width: 100%; max-width: 350px; position: relative; text-align: center; padding: 2.5rem;">
+                                <button id="closeQrModal"
+                                    style="position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; color: var(--text-muted); cursor: pointer;">&times;</button>
+                                <h2 style="margin-bottom: 2rem;">Scan to Connect</h2>
+                                <div id="qrCodeContainer"
+                                    style="display: flex; justify-content: center; margin-bottom: 1.5rem; padding: 1rem; background: white; border-radius: 12px; width: fit-content; margin-left: auto; margin-right: auto;">
+                                </div>
+                                <p style="color: var(--text-muted);">Scan this with another Velo device to connect
+                                    instantly.</p>
+                            </div>
                         </div>
                     </div>
                     <div class="live-stat">
@@ -635,6 +669,8 @@
 
     <!-- PeerJS Library -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <!-- Theme -->
     <script src="js/theme.js"></script>

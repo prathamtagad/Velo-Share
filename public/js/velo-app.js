@@ -225,6 +225,7 @@ class VeloApp {
 
     handleIncomingConnection(conn) {
         this.showToast(`${conn.metadata?.username || 'Someone'} connected!`, 'success');
+        this.playSound('connect');
         this.setupConnection(conn);
     }
 
@@ -531,6 +532,7 @@ class VeloApp {
                 });
                 this.activeTransfers.delete(id);
                 this.completeTransferUI(id, file.size, now);
+                this.saveHistory({ name: file.name, size: file.size, peer: 'Peers' }, 'send');
                 this.showToast(`Sent: ${file.name}`, 'success');
             }
         };
@@ -598,6 +600,7 @@ class VeloApp {
         this.transfers.delete(data.id);
         this.activeTransfers.delete(data.id);
         this.completeTransferUI(data.id, transfer.size, startTime);
+        this.saveHistory({ name: transfer.name, size: transfer.size, peer: peerId }, 'receive');
         this.showToast(`Received: ${transfer.name}`, 'success');
     }
 
@@ -673,8 +676,15 @@ class VeloApp {
             speedEl.style.color = 'var(--accent)';
         }
         if (etaEl) {
-            etaEl.textContent = `${elapsed.toFixed(1)}s`;
+            etaEl.textContent = `Done in ${elapsed.toFixed(1)}s`;
         }
+
+        // Trigger effects
+        this.triggerConfetti();
+
+        // Save history (we need transfer name, so we'll look it up from UI or pass it)
+        // For simplicity, let's just log it for now or implement full tracking lookup
+        // Ideally we should pass the full transfer object to completeTransferUI or save it before delete
     }
 
     // ==================== FORMATTERS ====================
@@ -705,9 +715,132 @@ class VeloApp {
         const secs = Math.round(seconds % 60);
         return `${mins}m ${secs}s`;
     }
+
+    // ==================== NEW FEATURES ====================
+
+    initNewFeatures() {
+        // 1. Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(() => console.log('Service Worker Registered'))
+                .catch(err => console.error('SW Registration Failed:', err));
+        }
+
+        // 2. Audio Context for Sounds
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // 3. Load History
+        this.loadHistory();
+
+        // 4. Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') this.disconnect();
+        });
+
+        // 5. QR Code Button
+        const qrBtn = document.getElementById('showQrBtn');
+        if (qrBtn) {
+            qrBtn.addEventListener('click', () => this.showQrCode());
+        }
+    }
+
+    playSound(type) {
+        if (this.audioCtx && this.audioCtx.state === 'suspended') this.audioCtx.resume();
+        if (!this.audioCtx) return;
+
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+
+        const now = this.audioCtx.currentTime;
+
+        if (type === 'connect') {
+            osc.frequency.setValueAtTime(440, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now);
+            osc.stop(now + 0.1);
+        } else if (type === 'message') {
+            osc.frequency.setValueAtTime(880, now);
+            gain.gain.setValueAtTime(0.05, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            osc.start(now);
+            osc.stop(now + 0.05);
+        } else if (type === 'error') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.linearRampToValueAtTime(100, now + 0.2);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        } else if (type === 'complete') {
+            osc.frequency.setValueAtTime(523.25, now);
+            osc.frequency.setValueAtTime(659.25, now + 0.1);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.linearRampToValueAtTime(0.01, now + 0.3);
+            osc.start(now);
+            osc.stop(now + 0.3);
+        }
+    }
+
+    showQrCode() {
+        const modal = document.getElementById('qrModal');
+        const container = document.getElementById('qrCodeContainer');
+        const closeBtn = document.getElementById('closeQrModal');
+
+        container.innerHTML = ''; // Clear previous
+
+        // Generate QR
+        if (window.QRCode) {
+            new QRCode(container, {
+                text: `https://velo-share.netlify.app/app.html?join=${this.myPeerId || ''}`,
+                width: 200,
+                height: 200,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+            modal.style.display = 'flex';
+        } else {
+            console.error('QRCode library not loaded');
+        }
+
+        const close = () => modal.style.display = 'none';
+        closeBtn.onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+    }
+
+    saveHistory(transfer, direction) {
+        const historyItem = {
+            name: transfer.name,
+            size: transfer.size,
+            date: Date.now(),
+            direction: direction,
+            peer: transfer.peer
+        };
+
+        let history = JSON.parse(localStorage.getItem('velo_history') || '[]');
+        history.unshift(historyItem);
+        if (history.length > 50) history.pop(); // Keep last 50
+        localStorage.setItem('velo_history', JSON.stringify(history));
+    }
+
+    loadHistory() {
+        // Could implement a history view UI here later
+        console.log('History loaded', JSON.parse(localStorage.getItem('velo_history') || '[]'));
+    }
+
+    triggerConfetti() {
+        this.showToast('🎉 Transfer Complete!', 'success');
+        this.playSound('complete');
+    }
 }
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     window.velo = new VeloApp();
+    window.velo.initNewFeatures();
 });
