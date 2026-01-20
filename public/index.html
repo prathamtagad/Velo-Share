@@ -4,23 +4,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Velo - Velocity. Simplicity. Privacy.</title>
+    <title>Velo - Instant P2P File Transfer</title>
+    <meta name="description"
+        content="Transfer files instantly between devices. No upload, no waiting. Pure peer-to-peer speed.">
     <link rel="stylesheet" href="css/style.css">
 </head>
 
 <body>
-
-    <!-- Nav -->
-    <nav class="navbar animate-entrance">
+    <!-- Navbar -->
+    <nav class="navbar">
         <a href="/" class="logo">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" class="logo-svg">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                 <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
             </svg>
             Velo
         </a>
         <div style="display: flex; gap: 1rem; align-items: center;">
             <button class="theme-toggle" id="themeToggle" title="Switch Theme">
-                <!-- Sun Icon -->
                 <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     stroke-width="2" style="display:none">
                     <circle cx="12" cy="12" r="5"></circle>
@@ -33,7 +33,6 @@
                     <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                     <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
                 </svg>
-                <!-- Moon Icon -->
                 <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     stroke-width="2">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
@@ -43,96 +42,123 @@
         </div>
     </nav>
 
-    <!-- Hero -->
-    <main
-        style="min-height: 90vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2rem;">
-        <div style="max-width: 800px;">
-            <div class="animate-entrance delay-1">
-                <span
-                    style="font-family: var(--font-heading); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.9rem;">
-                    Peer-to-Peer Reimagined
-                </span>
-            </div>
-
-            <h1 class="animate-entrance delay-2"
-                style="font-size: clamp(3rem, 10vw, 6rem); line-height: 1; margin: 1rem 0 2rem;">
-                Move files at the<br>
-                <span class="text-gradient">Speed of Thought.</span>
+    <!-- Hero Section -->
+    <section
+        style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6rem 2rem 4rem;">
+        <div class="animate-entrance" style="max-width: 800px;">
+            <h1 style="font-size: clamp(2.5rem, 8vw, 4.5rem); line-height: 1.1; margin-bottom: 1.5rem;">
+                Transfer files at <span class="text-gradient">infinite speed</span>
             </h1>
-
-            <p class="animate-entrance delay-3"
-                style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 3rem; max-width: 600px; margin-left: auto; margin-right: auto;">
-                No clouds. No limits. No footprints. Velo connects your devices directly for infinite transfer speed and
-                absolute privacy.
+            <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem;">
+                No upload. No server. No waiting. Velo connects devices directly for instant, encrypted file sharing.
             </p>
-
-            <div class="animate-entrance delay-3" style="display: flex; gap: 1rem; justify-content: center;">
-                <a href="app.html" class="btn-primary">Start Transfer</a>
-                <a href="#features" class="btn-ghost">How it works</a>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <a href="app.html" class="btn-primary" style="font-size: 1.1rem; padding: 1rem 2.5rem;">
+                    Start Transferring
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                </a>
+                <a href="about.html" class="btn-ghost" style="font-size: 1.1rem; padding: 1rem 2.5rem;">
+                    Learn More
+                </a>
             </div>
         </div>
-    </main>
+    </section>
 
     <!-- Features -->
-    <section id="features" style="padding: 6rem 2rem;">
-        <div
-            style="max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3rem;">
-            <!-- Feature 1 -->
-            <div class="transfer-card hover-lift">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">⚡</div>
-                <h3>Infinite Velocity</h3>
-                <p style="color: var(--text-secondary); margin-top: 1rem;">
-                    Bypassing servers means no bandwidth caps. Your transfer is only limited by your local network or
-                    internet connection.
-                </p>
-            </div>
+    <section style="padding: 4rem 2rem;">
+        <div style="max-width: 1000px; margin: 0 auto;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem;">
 
-            <!-- Feature 2 -->
-            <div class="transfer-card hover-lift">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🛡️</div>
-                <h3>Absolute Privacy</h3>
-                <p style="color: var(--text-secondary); margin-top: 1rem;">
-                    We don't see your files. WebRTC establishes a direct, encrypted handshake between you and your peer.
-                    Use Velo with confidence.
-                </p>
-            </div>
+                <div class="transfer-card hover-lift" style="text-align: center;">
+                    <div
+                        style="width: 56px; height: 56px; margin: 0 auto 1.5rem; background: var(--primary-glow); color: var(--primary); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                        </svg>
+                    </div>
+                    <h3 style="margin-bottom: 0.5rem;">Instant</h3>
+                    <p style="color: var(--text-secondary);">Files stream directly between devices. No upload/download
+                        wait time.</p>
+                </div>
 
-            <!-- Feature 3 -->
-            <div class="transfer-card hover-lift">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">💎</div>
-                <h3>Vibrant Design</h3>
-                <p style="color: var(--text-secondary); margin-top: 1rem;">
-                    A psychologically optimized interface designed to reduce stress and look beautiful in any
-                    environment.
-                </p>
+                <div class="transfer-card hover-lift" style="text-align: center;">
+                    <div
+                        style="width: 56px; height: 56px; margin: 0 auto 1.5rem; background: var(--accent-glow); color: var(--accent); border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                    </div>
+                    <h3 style="margin-bottom: 0.5rem;">Private</h3>
+                    <p style="color: var(--text-secondary);">End-to-end encrypted. Your files never touch our servers.
+                    </p>
+                </div>
+
+                <div class="transfer-card hover-lift" style="text-align: center;">
+                    <div
+                        style="width: 56px; height: 56px; margin: 0 auto 1.5rem; background: rgba(251, 191, 36, 0.15); color: #FBBF24; border-radius: 16px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                        </svg>
+                    </div>
+                    <h3 style="margin-bottom: 0.5rem;">No Limits</h3>
+                    <p style="color: var(--text-secondary);">Send files of any size. No artificial caps or premium
+                        tiers.</p>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- How it Works -->
+    <section style="padding: 4rem 2rem; background: var(--bg-surface);">
+        <div style="max-width: 800px; margin: 0 auto; text-align: center;">
+            <h2 style="font-size: 2rem; margin-bottom: 3rem;">How it works</h2>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem;">
+                <div>
+                    <div
+                        style="width: 48px; height: 48px; margin: 0 auto 1rem; border-radius: 50%; background: var(--bg-main); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--primary);">
+                        1</div>
+                    <h4>Host or Join</h4>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Start a session or enter a Peer ID to
+                        connect.</p>
+                </div>
+                <div>
+                    <div
+                        style="width: 48px; height: 48px; margin: 0 auto 1rem; border-radius: 50%; background: var(--bg-main); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--primary);">
+                        2</div>
+                    <h4>Share ID</h4>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Share your unique Peer ID with anyone you
+                        want to connect.</p>
+                </div>
+                <div>
+                    <div
+                        style="width: 48px; height: 48px; margin: 0 auto 1rem; border-radius: 50%; background: var(--bg-main); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--primary);">
+                        3</div>
+                    <h4>Drop Files</h4>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Drag and drop files to send instantly.</p>
+                </div>
             </div>
         </div>
     </section>
 
     <!-- Footer -->
-    <footer>
-        <div style="margin-bottom: 2rem;">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" style="color: var(--primary);">
-                <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
-            </svg>
+    <footer style="padding: 3rem 2rem; text-align: center; border-top: 1px solid var(--border-light);">
+        <div style="margin-bottom: 1rem;">
+            <a href="about.html" style="color: var(--text-muted); text-decoration: none; margin: 0 1rem;">About</a>
+            <a href="privacy.html" style="color: var(--text-muted); text-decoration: none; margin: 0 1rem;">Privacy</a>
+            <a href="terms.html" style="color: var(--text-muted); text-decoration: none; margin: 0 1rem;">Terms</a>
         </div>
-        <div>
-            <a href="about.html">About</a>
-            <a href="privacy.html">Privacy</a>
-            <a href="terms.html">Terms</a>
-            <a href="https://github.com/pratham-jaiswal/py-share-v2" target="_blank">GitHub</a>
-        </div>
-        <p style="margin-top: 2rem; font-size: 0.9rem; color: var(--text-muted);">&copy; 2026 Velo P2P. Crafted for
-            speed.</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">© 2026 Velo. Built for speed.</p>
     </footer>
 
     <script src="js/theme.js"></script>
-    <script>
-        // Entrance animation trigger
-        document.querySelectorAll('.animate-entrance').forEach(el => {
-            el.style.opacity = '1';
-        });
-    </script>
 </body>
 
 </html>

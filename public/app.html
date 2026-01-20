@@ -4,10 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Velo - Transfer</title>
+    <title>Velo - Instant P2P File Transfer</title>
     <link rel="stylesheet" href="css/style.css">
     <style>
-        /* ========== FULL PAGE TRANSFER STYLES ========== */
+        /* ========== APP SPECIFIC STYLES ========== */
         .app-container {
             min-height: 100vh;
             display: flex;
@@ -41,9 +41,9 @@
         .room-code {
             font-family: 'Space Grotesk', monospace;
             font-weight: 700;
-            font-size: 1.25rem;
+            font-size: 1.1rem;
             color: var(--primary);
-            letter-spacing: 0.1em;
+            letter-spacing: 0.05em;
         }
 
         .copy-btn {
@@ -74,7 +74,7 @@
 
         .stat-value {
             font-weight: 700;
-            font-size: 1.1rem;
+            font-size: 1rem;
             color: var(--text-primary);
         }
 
@@ -83,6 +83,20 @@
             text-transform: uppercase;
             color: var(--text-muted);
             letter-spacing: 0.05em;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        .status-dot.connected {
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
         }
 
         /* Main Content Area */
@@ -169,9 +183,9 @@
         /* Big Drop Area */
         .mega-drop {
             width: 100%;
-            max-width: 500px;
+            max-width: 400px;
             aspect-ratio: 1;
-            max-height: 400px;
+            max-height: 350px;
             border: 3px dashed var(--border-light);
             border-radius: 50%;
             display: flex;
@@ -192,8 +206,8 @@
         }
 
         .mega-drop-icon {
-            width: 80px;
-            height: 80px;
+            width: 64px;
+            height: 64px;
             color: var(--text-secondary);
             margin-bottom: 1rem;
             transition: color 0.3s;
@@ -204,18 +218,19 @@
         }
 
         .mega-drop h2 {
-            font-size: 1.5rem;
+            font-size: 1.3rem;
             margin-bottom: 0.5rem;
         }
 
         .mega-drop p {
             color: var(--text-muted);
+            font-size: 0.9rem;
         }
 
         /* Queue Section */
         .queue-section {
             width: 100%;
-            max-width: 600px;
+            max-width: 550px;
             margin-top: 2rem;
         }
 
@@ -266,6 +281,7 @@
             align-items: center;
             justify-content: center;
             color: var(--primary);
+            flex-shrink: 0;
         }
 
         .file-info {
@@ -287,6 +303,7 @@
 
         .file-progress {
             text-align: right;
+            flex-shrink: 0;
         }
 
         .file-percent {
@@ -312,17 +329,68 @@
             .top-bar {
                 flex-wrap: wrap;
                 gap: 1rem;
+                padding: 1rem;
             }
 
             .mega-drop {
-                max-width: 300px;
-                max-height: 300px;
+                max-width: 280px;
+                max-height: 280px;
             }
         }
 
-        /* Hidden elements needed by JS */
-        .hidden-stats {
-            display: none !important;
+        /* Landing Cards */
+        .landing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            max-width: 700px;
+            width: 100%;
+        }
+
+        .action-card {
+            background: var(--bg-surface);
+            border-radius: 24px;
+            padding: 2.5rem 2rem;
+            border: 1px solid var(--border-light);
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .action-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--primary);
+        }
+
+        .action-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1.5rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 12px;
+            border: 1px solid var(--border-light);
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-field:focus {
+            border-color: var(--primary);
+        }
+
+        .input-field::placeholder {
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -330,31 +398,32 @@
 <body>
     <div class="app-container">
 
-        <!-- Landing Screen -->
+        <!-- ==================== LANDING SCREEN ==================== -->
         <div id="landingScreen"
             style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem;">
-            <div
-                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; max-width: 700px; width: 100%;">
+            <div class="landing-grid">
 
-                <!-- Create Room Card -->
-                <div class="transfer-card hover-lift" id="createRoomCard" style="cursor: pointer; text-align: center;">
-                    <div
-                        style="width: 64px; height: 64px; margin: 0 auto 1.5rem; background: var(--primary-glow); color: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <!-- Host Card -->
+                <div class="action-card" id="hostCard">
+                    <div class="action-icon" style="background: var(--primary-glow); color: var(--primary);">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <path d="M12 5v14M5 12h14" />
                         </svg>
                     </div>
-                    <h2 style="margin-bottom: 0.5rem;">Start a Room</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Create a private space to share
-                        files.</p>
-                    <button class="btn-primary" style="width: 100%; justify-content: center;">Create</button>
+                    <h2 style="margin-bottom: 0.5rem;">Host</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Create a session and share your ID.
+                    </p>
+
+                    <input type="text" id="hostNameInput" class="input-field" placeholder="Your name"
+                        style="margin-bottom: 1rem;">
+                    <button class="btn-primary" style="width: 100%; justify-content: center;" id="hostBtn">Start
+                        Hosting</button>
                 </div>
 
-                <!-- Join Room Card -->
-                <div class="transfer-card hover-lift" id="joinRoomCard" style="cursor: pointer; text-align: center;">
-                    <div
-                        style="width: 64px; height: 64px; margin: 0 auto 1.5rem; background: var(--accent-glow); color: var(--accent); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <!-- Join Card -->
+                <div class="action-card" id="joinCard">
+                    <div class="action-icon" style="background: var(--accent-glow); color: var(--accent);">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
@@ -362,15 +431,20 @@
                             <line x1="15" y1="12" x2="3" y2="12" />
                         </svg>
                     </div>
-                    <h2 style="margin-bottom: 0.5rem;">Join a Room</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Enter a code to connect with peers.
-                    </p>
-                    <button class="btn-ghost" style="width: 100%; justify-content: center;">Join</button>
+                    <h2 style="margin-bottom: 0.5rem;">Join</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Enter a Peer ID to connect.</p>
+
+                    <input type="text" id="joinNameInput" class="input-field" placeholder="Your name"
+                        style="margin-bottom: 0.75rem;">
+                    <input type="text" id="peerIdInput" class="input-field" placeholder="Peer ID to connect"
+                        style="margin-bottom: 1rem; text-transform: uppercase;">
+                    <button class="btn-ghost" style="width: 100%; justify-content: center;"
+                        id="joinBtn">Connect</button>
                 </div>
             </div>
         </div>
 
-        <!-- Room Screen (Hidden Initially) -->
+        <!-- ==================== ROOM SCREEN ==================== -->
         <div id="roomScreen" style="display: none; flex: 1; flex-direction: column;">
 
             <!-- Top Bar -->
@@ -383,33 +457,21 @@
                 </a>
 
                 <div class="room-badge">
-                    <span style="color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Room</span>
-                    <span class="room-code" id="roomCodeDisplay">------</span>
-                    <button class="copy-btn" id="copyRoomCode">Copy</button>
+                    <span style="color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Your ID</span>
+                    <span class="room-code" id="myPeerId">------</span>
+                    <button class="copy-btn" id="copyPeerId">Copy</button>
                 </div>
 
                 <div class="stats-group">
                     <div class="stat-item">
-                        <div class="stat-value" id="currentSpeed">0 MB/s</div>
-                        <div class="stat-label">Speed</div>
+                        <div class="stat-value"><span class="status-dot" id="connectionDot"></span><span
+                                id="connectionStatus">Disconnected</span></div>
+                        <div class="stat-label">Status</div>
                     </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="peerCount">0</div>
-                        <div class="stat-label">Peers</div>
-                    </div>
-                    <button id="leaveRoom" class="btn-ghost"
+                    <button id="disconnectBtn" class="btn-ghost"
                         style="padding: 0.5rem 1rem; color: var(--danger); border-color: var(--danger);">
-                        Leave
+                        Disconnect
                     </button>
-                </div>
-
-                <!-- Hidden stat holders for JS compatibility -->
-                <div class="hidden-stats">
-                    <span id="headerStats"></span>
-                    <span id="speedValue"></span>
-                    <span id="peakSpeed"></span>
-                    <span id="avgSpeed"></span>
-                    <span id="totalTransferred"></span>
                 </div>
             </header>
 
@@ -426,9 +488,17 @@
                         </svg>
                         Connected Peers
                     </div>
-                    <ul class="peer-list" id="usersList">
-                        <!-- Peers render here -->
+                    <ul class="peer-list" id="peerList">
+                        <li style="color: var(--text-muted); font-size: 0.9rem;">No peers connected yet.</li>
                     </ul>
+
+                    <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border-light);">
+                        <div class="sidebar-title">Add Peer</div>
+                        <input type="text" id="addPeerInput" class="input-field" placeholder="Enter Peer ID"
+                            style="margin-bottom: 0.5rem; font-size: 0.9rem; padding: 0.75rem;">
+                        <button class="btn-primary" style="width: 100%; justify-content: center; padding: 0.6rem;"
+                            id="addPeerBtn">Connect</button>
+                    </div>
                 </aside>
 
                 <!-- Main Transfer Area -->
@@ -448,11 +518,11 @@
                     </div>
 
                     <!-- Transfer Queue -->
-                    <section class="queue-section" id="transferQueue">
+                    <section class="queue-section">
                         <div class="queue-header">
                             <span class="queue-title">Transfers</span>
                         </div>
-                        <div id="queueList">
+                        <div id="transferQueue">
                             <!-- File items render here -->
                         </div>
                     </section>
@@ -461,39 +531,19 @@
         </div>
     </div>
 
-    <!-- Modal -->
-    <div id="setupModal"
-        style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); align-items: center; justify-content: center; z-index: 200;">
-        <div class="transfer-card" style="width: 100%; max-width: 400px; position: relative;">
-            <button id="closeModal"
-                style="position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; color: var(--text-muted); cursor: pointer;">&times;</button>
-            <h2 id="modalTitle" style="margin-bottom: 1.5rem; text-align: center;">Your Name</h2>
-
-            <div style="margin-bottom: 1rem;">
-                <input type="text" id="usernameInput" placeholder="Enter your name"
-                    style="width: 100%; padding: 1rem; border-radius: 12px; border: 1px solid var(--border-light); background: var(--bg-main); color: var(--text-primary); font-size: 1rem; outline: none;">
-            </div>
-
-            <div id="roomCodeGroup" style="display: none; margin-bottom: 1rem;">
-                <input type="text" id="roomCodeInput" placeholder="Room Code" maxlength="6"
-                    style="width: 100%; padding: 1rem; border-radius: 12px; border: 1px solid var(--border-light); background: var(--bg-main); color: var(--text-primary); font-size: 1rem; outline: none; text-transform: uppercase; text-align: center; letter-spacing: 0.2em;">
-            </div>
-
-            <button id="confirmSetup" class="btn-primary"
-                style="width: 100%; justify-content: center;">Continue</button>
-        </div>
-    </div>
-
     <!-- Toast Container -->
     <div id="toastContainer"
         style="position: fixed; bottom: 2rem; right: 2rem; display: flex; flex-direction: column; gap: 0.75rem; z-index: 300;">
     </div>
 
-    <!-- Scripts -->
+    <!-- PeerJS Library -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+    <!-- Theme -->
     <script src="js/theme.js"></script>
-    <script src="js/webrtc.js"></script>
-    <script src="js/transfer.js"></script>
-    <script src="js/app.js"></script>
+
+    <!-- Main App Logic -->
+    <script src="js/velo-app.js"></script>
 </body>
 
 </html>
