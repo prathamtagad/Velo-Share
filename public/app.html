@@ -399,11 +399,29 @@
         }
 
         /* Landing Cards */
+        .landing-wrap {
+            display: grid;
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 900px;
+            text-align: center;
+        }
+
+        .landing-header h1 {
+            font-size: clamp(2rem, 5vw, 2.8rem);
+            margin-bottom: 0.5rem;
+        }
+
+        .landing-header p {
+            color: var(--text-secondary);
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
         .landing-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 2rem;
-            max-width: 700px;
+            gap: 1.25rem;
             width: 100%;
         }
 
@@ -461,45 +479,76 @@
         <!-- ==================== LANDING SCREEN ==================== -->
         <div id="landingScreen"
             style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem;">
-            <div class="landing-grid">
-
-                <!-- Host Card -->
-                <div class="action-card" id="hostCard">
-                    <div class="action-icon" style="background: var(--primary-glow); color: var(--primary);">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 5v14M5 12h14" />
-                        </svg>
+            <div class="landing-wrap">
+                <div class="landing-header">
+                    <div class="badge">Start a transfer</div>
+                    <h1>Host or join a Velo room</h1>
+                    <p>Pick your lane, share the ID, and drop files. Built by Pratham Tagad to move bytes at light speed.</p>
+                    <div class="pill-row" style="justify-content: center;">
+                        <span class="pill">P2P + WebRTC</span>
+                        <span class="pill">Encrypted</span>
+                        <span class="pill">No limits</span>
                     </div>
-                    <h2 style="margin-bottom: 0.5rem;">Host</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Create a session and share your ID.
-                    </p>
-
-                    <input type="text" id="hostNameInput" class="input-field" placeholder="Your name"
-                        style="margin-bottom: 1rem;">
-                    <button class="btn-primary" style="width: 100%; justify-content: center;" id="hostBtn">Start
-                        Hosting</button>
                 </div>
 
-                <!-- Join Card -->
-                <div class="action-card" id="joinCard">
-                    <div class="action-icon" style="background: var(--accent-glow); color: var(--accent);">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                            <polyline points="10 17 15 12 10 7" />
-                            <line x1="15" y1="12" x2="3" y2="12" />
-                        </svg>
-                    </div>
-                    <h2 style="margin-bottom: 0.5rem;">Join</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Enter a Peer ID to connect.</p>
+                <div class="landing-grid">
 
-                    <input type="text" id="joinNameInput" class="input-field" placeholder="Your name"
-                        style="margin-bottom: 0.75rem;">
-                    <input type="text" id="peerIdInput" class="input-field" placeholder="Peer ID to connect"
-                        style="margin-bottom: 1rem; text-transform: uppercase;">
-                    <button class="btn-ghost" style="width: 100%; justify-content: center;"
-                        id="joinBtn">Connect</button>
+                    <!-- Host Card -->
+                    <div class="action-card" id="hostCard">
+                        <div class="action-icon" style="background: var(--primary-glow); color: var(--primary);">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 5v14M5 12h14" />
+                            </svg>
+                        </div>
+                        <h2 style="margin-bottom: 0.5rem;">Host</h2>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.25rem;">Create a session and share your ID.</p>
+
+                        <input type="text" id="hostNameInput" class="input-field" placeholder="Your name"
+                            style="margin-bottom: 1rem;">
+                        <button class="btn-primary" style="width: 100%; justify-content: center;" id="hostBtn">Start
+                            Hosting</button>
+                    </div>
+
+                    <!-- Join Card -->
+                    <div class="action-card" id="joinCard">
+                        <div class="action-icon" style="background: var(--accent-glow); color: var(--accent);">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                                <polyline points="10 17 15 12 10 7" />
+                                <line x1="15" y1="12" x2="3" y2="12" />
+                            </svg>
+                        </div>
+                        <h2 style="margin-bottom: 0.5rem;">Join</h2>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.25rem;">Enter a Peer ID to connect.</p>
+
+                        <input type="text" id="joinNameInput" class="input-field" placeholder="Your name"
+                            style="margin-bottom: 0.75rem;">
+                        <input type="text" id="peerIdInput" class="input-field" placeholder="Peer ID to connect"
+                            style="margin-bottom: 1rem; text-transform: uppercase;">
+                        <button class="btn-ghost" style="width: 100%; justify-content: center;"
+                            id="joinBtn">Connect</button>
+                    </div>
+
+                    <!-- Contact Card -->
+                    <div class="action-card" style="border-style: dashed; border-color: var(--border-light);">
+                        <div class="action-icon" style="background: var(--bg-main); color: var(--text-primary);">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M4 4h16v16H4z" />
+                                <path d="M4 9h16" />
+                                <path d="M9 15h6" />
+                                <path d="M9 12h6" />
+                            </svg>
+                        </div>
+                        <h2 style="margin-bottom: 0.5rem;">Need help?</h2>
+                        <p style="color: var(--text-secondary); margin-bottom: 1rem;">Reach Pratham Tagad—open for feedback, bugs, or feature ideas.</p>
+                        <div style="display: grid; gap: 0.5rem;">
+                            <a class="btn-primary" style="justify-content: center;" href="mailto:prathamtagad0@email.com">Email</a>
+                            <a class="btn-ghost" style="justify-content: center;" href="https://github.com/prathamtagad" target="_blank" rel="noreferrer">GitHub</a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -17,45 +17,102 @@
             Velo
         </a>
         <div style="display: flex; gap: 1rem; align-items: center;">
-            <button class="theme-toggle" id="themeToggle"></button>
+            <button class="theme-toggle" id="themeToggle" title="Switch Theme">
+                <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" style="display:none">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
             <a href="app.html" class="btn-primary">Launch App</a>
         </div>
     </nav>
 
-    <main style="max-width: 800px; margin: 8rem auto; padding: 0 2rem;">
-        <h1 style="font-size: 3rem; margin-bottom: 2rem;">The Velo Mission</h1>
-        <p style="color: var(--text-secondary); font-size: 1.25rem; margin-bottom: 4rem;">
-            We believe that sharing something with the person next to you shouldn't involve a trip around the world.
-        </p>
-
-        <div class="transfer-card" style="text-align: left; margin-bottom: 4rem;">
-            <h2>Why we exist</h2>
-            <p style="margin-top: 1rem; color: var(--text-secondary);">
-                Cloud services are great for storage, but terrible for instant transfer. They impse limits, require
-                sign-ups, and track your data.
-                Velo was built to be the anti-cloud. We use <strong>WebRTC</strong> to create a direct data tunnel
-                between peers.
-            </p>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-            <div>
-                <h3>Values</h3>
-                <ul style="margin-top: 1rem; color: var(--text-secondary); line-height: 2;">
-                    <li>Speed above all else.</li>
-                    <li>Privacy by default.</li>
-                    <li>Zero friction.</li>
-                </ul>
+    <main class="page-shell">
+        <section class="page-hero">
+            <div class="badge">About Velo</div>
+            <h1>The peer-to-peer lane for files</h1>
+            <p style="color: var(--text-secondary); max-width: 720px;">We’re building a zero-friction handoff for your files. Velo skips the cloud and connects devices directly with encrypted WebRTC data channels—because sharing with the person next to you shouldn’t orbit the planet first.</p>
+            <div class="page-meta">
+                <span class="pill">Instant P2P</span>
+                <span class="pill">End-to-end encrypted</span>
+                <span class="pill">No size caps</span>
+                <span class="pill">Built by Pratham Tagad</span>
             </div>
-            <div>
-                <h3>Tech Stack</h3>
-                <ul style="margin-top: 1rem; color: var(--text-secondary); line-height: 2;">
-                    <li>Node.js & WebSocket (Signaling)</li>
-                    <li>WebRTC (Data Channels)</li>
-                    <li>Vanilla JS (Performance)</li>
-                </ul>
+        </section>
+
+        <div class="info-grid">
+            <div class="info-card">
+                <p class="overline">Mission</p>
+                <h3>Share without the wait</h3>
+                <p>Cloud storage is great for archives—not for quick passes. Velo moves files directly between browsers so your data never detours.</p>
+            </div>
+            <div class="info-card">
+                <p class="overline">Values</p>
+                <p>Speed above all. Privacy by default. Zero friction from click to complete.</p>
+            </div>
+            <div class="info-card">
+                <p class="overline">Stack</p>
+                <p>Node.js + WebSocket for signaling, WebRTC DataChannels for transfer, lean vanilla JS for performance.</p>
             </div>
         </div>
+
+        <section class="section surface" style="width: 100%;">
+            <div class="section-header" style="text-align: center;">
+                <p class="overline">How Velo works</p>
+                <h2>Three steps to send</h2>
+            </div>
+            <div class="steps-grid">
+                <div class="step-card">
+                    <div class="step-number">1</div>
+                    <h4>Host or join</h4>
+                    <p>Spin up a room or enter a Peer ID—no accounts, no logins.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">2</div>
+                    <h4>Share the ID</h4>
+                    <p>Send your unique Peer ID or QR so the recipient can latch on.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">3</div>
+                    <h4>Drop your files</h4>
+                    <p>Drag, drop, and watch encrypted transfers finish in real time.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="info-grid">
+            <div class="info-card">
+                <p class="overline">Built by</p>
+                <h3>Pratham Tagad</h3>
+                <p>Web Developer · UI Enthusiast · B.Tech student. Designing modern, scalable experiences with React, Vue, Node.js, Django, and Tailwind.</p>
+                <div class="dev-links" style="margin-top: 0.25rem;">
+                    <a href="https://prathamtagad.netlify.app/" target="_blank" rel="noreferrer">Portfolio</a>
+                    <a href="https://github.com/prathamtagad" target="_blank" rel="noreferrer">GitHub</a>
+                    <a href="mailto:prathamtagad0@email.com">Email</a>
+                    <a href="https://linkedin.com/in/pratham-tagad-051946301/" target="_blank" rel="noreferrer">LinkedIn</a>
+                </div>
+            </div>
+            <div class="info-card">
+                <p class="overline">Security</p>
+                <p>Peer IDs are temporary. Signaling data is transient. Transfers are end-to-end via WebRTC; files never touch our servers.</p>
+            </div>
+            <div class="info-card">
+                <p class="overline">Performance</p>
+                <p>Low-latency signaling, binary DataChannels, and a lightweight UI keep Velo responsive on desktop and mobile.</p>
+            </div>
+        </section>
     </main>
 
     <script src="js/theme.js"></script>
