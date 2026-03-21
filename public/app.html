@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#7C3AED">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/app-icon.svg">
     <style>
         /* ========== APP SPECIFIC STYLES ========== */
         .app-container {
@@ -17,262 +17,158 @@
             flex-direction: column;
         }
 
-        /* Top Bar */
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1rem 2rem;
-            border-bottom: 1px solid var(--border-light);
-            background: var(--bg-glass);
-            backdrop-filter: blur(20px);
-            position: sticky;
-            top: 0;
-            z-index: 50;
-        }
-
-        .room-badge {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            background: var(--bg-surface);
-            padding: 0.5rem 1rem;
-            border-radius: 12px;
-            border: 1px solid var(--border-light);
-        }
-
-        .room-code {
-            font-family: 'Space Grotesk', monospace;
-            font-weight: 700;
-            font-size: 1.1rem;
-            color: var(--primary);
-            letter-spacing: 0.05em;
-        }
-
-        .copy-btn {
-            background: var(--bg-main);
-            border: none;
-            color: var(--text-secondary);
-            padding: 0.4rem 0.8rem;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: all 0.2s;
-        }
-
-        .copy-btn:hover {
-            background: var(--primary);
-            color: white;
-        }
-
-        .stats-group {
-            display: flex;
-            gap: 1.5rem;
-            align-items: center;
-        }
-
-        .stat-item {
-            text-align: center;
-        }
-
-        .stat-value {
-            font-weight: 700;
-            font-size: 1rem;
-            color: var(--text-primary);
-        }
-
-        .stat-label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            color: var(--text-muted);
-            letter-spacing: 0.05em;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--text-muted);
-            display: inline-block;
-            margin-right: 0.5rem;
-        }
-
-        .status-dot.connected {
-            background: var(--accent);
-            box-shadow: 0 0 8px var(--accent);
-        }
-
         /* Main Content Area */
-        .main-content {
+        .main-stage {
             flex: 1;
             display: grid;
-            grid-template-columns: 280px 1fr;
-            gap: 0;
+            grid-template-columns: 1fr clamp(340px, 36vw, 440px);
+            min-height: calc(100vh - 180px);
+            background: radial-gradient(circle at 20% 20%, var(--primary-glow), transparent 30%),
+                radial-gradient(circle at 80% 30%, var(--accent-glow), transparent 28%),
+                var(--bg-main);
         }
 
-        /* Sidebar */
-        .sidebar {
-            background: var(--bg-surface);
-            border-right: 1px solid var(--border-light);
-            padding: 1.5rem;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .sidebar-title {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--text-muted);
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .peer-list {
-            list-style: none;
-            flex: 1;
-        }
-
-        .peer-card {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.75rem;
-            background: var(--bg-main);
-            border-radius: 12px;
-            margin-bottom: 0.5rem;
-            border: 1px solid transparent;
-            transition: all 0.2s;
-        }
-
-        .peer-card.connected {
-            border-color: var(--accent);
-        }
-
-        .peer-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-        }
-
-        .peer-name {
-            font-weight: 500;
-        }
-
-        .peer-status {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
-
-        /* Transfer Zone */
-        .transfer-zone {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
+        .left-pane {
             position: relative;
+            padding: clamp(1.5rem, 3vw, 2.5rem);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
 
-        /* Big Drop Area */
-        .mega-drop {
-            width: 100%;
-            max-width: 400px;
+        .portal-zone {
+            width: min(420px, 90vw);
             aspect-ratio: 1;
-            max-height: 350px;
-            border: 3px dashed var(--border-light);
-            border-radius: 50%;
+            border-radius: 28px;
+            border: 2px dashed var(--border-light);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            text-align: center;
+            transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(52, 211, 153, 0.08));
             cursor: pointer;
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            background: var(--bg-glass);
             position: relative;
+            overflow: hidden;
+            margin-top: 0.25rem;
         }
 
-        .mega-drop:hover,
-        .mega-drop.drag-over {
-            border-color: var(--primary);
-            transform: scale(1.02);
-            box-shadow: 0 0 80px var(--primary-glow), inset 0 0 60px var(--primary-glow);
+        .portal-ring {
+            position: absolute;
+            inset: 14px;
+            border-radius: 20px;
+            border: 1px dashed var(--accent);
+            opacity: 0.3;
+            animation: spin 12s linear infinite;
+            pointer-events: none;
         }
 
-        .mega-drop-icon {
-            width: 64px;
-            height: 64px;
-            color: var(--text-secondary);
-            margin-bottom: 1rem;
-            transition: color 0.3s;
+        .portal-zone::after {
+            content: '';
+            position: absolute;
+            inset: 12px;
+            border-radius: 20px;
+            border: 1px solid var(--border-light);
+            pointer-events: none;
         }
 
-        .mega-drop:hover .mega-drop-icon {
-            color: var(--primary);
+        .portal-zone:hover,
+        .portal-zone.dragover {
+            border-color: var(--accent);
+            box-shadow: 0 20px 70px rgba(0, 0, 0, 0.25), 0 0 50px var(--primary-glow);
+            transform: translateY(-4px) scale(1.01);
         }
 
-        .mega-drop h2 {
-            font-size: 1.3rem;
-            margin-bottom: 0.5rem;
+        .portal-zone svg {
+            color: var(--accent);
         }
 
-        .mega-drop p {
+        .portal-title {
+            margin: 0.5rem 0 0.35rem;
+            font-size: 1.2rem;
+        }
+
+        .portal-subtext {
             color: var(--text-muted);
-            font-size: 0.9rem;
+            font-size: 0.95rem;
         }
 
-        /* Queue Section */
-        .queue-section {
-            width: 100%;
-            max-width: 550px;
-            margin-top: 2rem;
+        .right-pane {
+            background: var(--bg-surface);
+            border-left: 1px solid var(--border-light);
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            min-height: 100%;
         }
 
-        .queue-header {
+        .transfers-header {
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-light);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
 
-        .queue-title {
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--text-muted);
+        .header-meta {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
         }
 
-        .file-item {
+        .meta-chip {
+            padding: 0.4rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--border-light);
+            background: var(--bg-main);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: inline-flex;
+            gap: 0.35rem;
+            align-items: center;
+        }
+
+        .transfers-panel {
+            overflow-y: auto;
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .file-card-modern {
+            background: var(--bg-surface);
+            border-radius: 16px;
+            padding: 1rem;
+            border: 1px solid var(--border-light);
             display: flex;
             align-items: center;
             gap: 1rem;
-            padding: 1rem;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-light);
-            border-radius: 16px;
-            margin-bottom: 0.75rem;
             position: relative;
             overflow: hidden;
+            box-shadow: var(--shadow-sm);
         }
 
-        .file-item::after {
-            content: '';
+        .file-card-modern .progress-bg {
             position: absolute;
-            bottom: 0;
             left: 0;
+            bottom: 0;
             height: 3px;
+            background: var(--border-light);
+            width: 100%;
+        }
+
+        .file-card-modern .progress-fill {
+            height: 100%;
             background: var(--primary);
-            width: var(--progress, 0%);
-            transition: width 0.3s;
+            width: 0%;
+            transition: width 0.2s linear;
+            box-shadow: 0 0 10px var(--primary-glow);
         }
 
         .file-icon {
@@ -293,31 +189,31 @@
         }
 
         .file-name {
-            font-weight: 600;
+            font-weight: 700;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
         .file-meta {
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             color: var(--text-muted);
         }
 
         .file-stats {
             text-align: right;
             flex-shrink: 0;
-            min-width: 80px;
+            min-width: 90px;
         }
 
         .file-speed {
-            font-weight: 600;
-            font-size: 0.9rem;
+            font-weight: 700;
+            font-size: 0.95rem;
             color: var(--primary);
         }
 
         .file-eta {
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             color: var(--text-muted);
         }
 
@@ -333,47 +229,38 @@
         }
 
         .file-percent {
-            font-weight: 700;
-            font-size: 0.9rem;
+            font-weight: 800;
+            font-size: 0.95rem;
         }
 
-        /* Live Stats Bar */
-        .live-stats-bar {
-            display: flex;
-            gap: 2rem;
+        .stats-floater {
+            position: sticky;
+            bottom: 0;
+            margin: 0 1.5rem 1.5rem;
             background: var(--bg-surface);
-            padding: 0.75rem 1.5rem;
-            border-radius: 16px;
-            border: 1px solid var(--border-light);
-            flex-wrap: wrap;
-        }
-
-        .live-stat {
-            display: flex;
-            align-items: center;
+            padding: 0.85rem 1.1rem;
+            border-radius: 14px;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.5rem;
+            border: 1px solid var(--border-light);
+            box-shadow: var(--shadow-md);
         }
 
-        .live-stat-icon {
-            width: 32px;
-            height: 32px;
-            background: var(--primary-glow);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--primary);
+        .stat-mini {
+            display: grid;
+            gap: 0.15rem;
+            text-align: center;
         }
 
-        .live-stat-value {
-            font-weight: 700;
-            font-size: 1rem;
+        .stat-mini-val {
+            font-weight: 800;
         }
 
-        .live-stat-label {
+        .stat-mini-lbl {
             font-size: 0.7rem;
             color: var(--text-muted);
-            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         /* Responsive */
@@ -559,8 +446,8 @@
             .dashboard-layout {
                 display: flex;
                 flex-direction: column;
-                height: 100vh;
-                overflow: hidden;
+                min-height: 100vh;
+                background: var(--bg-main);
             }
 
             .dashboard-header {
@@ -572,18 +459,81 @@
                 padding: 1rem 1.5rem;
                 background: var(--bg-surface);
                 border-bottom: 1px solid var(--border-light);
+                position: sticky;
+                top: 0;
+                z-index: 10;
+            }
+
+            .header-left {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+            }
+
+            .header-meta-chip {
+                padding: 0.4rem 0.8rem;
+                border-radius: 12px;
+                border: 1px solid var(--border-light);
+                background: var(--bg-main);
+                color: var(--text-secondary);
+                font-weight: 700;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                box-shadow: var(--shadow-sm);
+            }
+
+            .header-actions {
+                display: flex;
+                gap: 0.35rem;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: flex-end;
+            }
+
+            .header-actions .btn-ghost,
+            .header-actions .btn-primary {
+                border-radius: 12px;
+                height: 36px;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.35rem;
+                padding: 0 0.75rem;
+                font-size: 0.9rem;
+            }
+
+            .header-actions .icon-btn {
+                width: 36px;
+                min-width: 36px;
+                padding: 0;
+                justify-content: center;
+            }
+
+            @media (max-width: 780px) {
+                .header-actions {
+                    gap: 0.25rem;
+                }
+
+                .header-actions .btn-primary,
+                .header-actions .btn-ghost {
+                    padding: 0 0.65rem;
+                }
+
+                .header-actions .desktop-only {
+                    display: none;
+                }
             }
 
             .peer-bar {
                 display: flex;
-                gap: 1rem;
-                padding: 1rem 1.5rem;
+                gap: 0.75rem;
+                padding: 0.85rem 1.5rem;
                 overflow-x: auto;
                 background: var(--bg-main);
                 border-bottom: 1px solid var(--border-light);
                 align-items: center;
                 scrollbar-width: none;
-                /* Hide scrollbar */
                 flex-wrap: nowrap;
             }
 
@@ -596,11 +546,12 @@
                 align-items: center;
                 gap: 0.5rem;
                 background: var(--bg-surface);
-                padding: 0.5rem 1rem;
-                border-radius: 50px;
+                padding: 0.45rem 0.9rem;
+                border-radius: 14px;
                 border: 1px solid var(--border-light);
                 min-width: fit-content;
                 transition: all 0.2s;
+                box-shadow: var(--shadow-sm);
             }
 
             .peer-pill.active {
@@ -621,69 +572,6 @@
                 font-size: 0.8rem;
             }
 
-            .main-stage {
-                flex: 1;
-                display: flex;
-                flex-direction: row;
-                overflow: auto;
-                position: relative;
-            }
-
-            .left-pane {
-                flex: 1;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: var(--bg-main);
-                padding: 2rem;
-                position: relative;
-            }
-
-            .right-pane {
-                width: clamp(320px, 35vw, 450px);
-                background: var(--bg-surface);
-                border-left: 1px solid var(--border-light);
-                display: flex;
-                flex-direction: column;
-                position: relative;
-                z-index: 20;
-            }
-
-            /* Portal Drop Zone */
-            .portal-zone {
-                width: 320px;
-                height: 320px;
-                border-radius: 50%;
-                border: 2px dashed var(--border-light);
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-                transition: all 0.4s ease;
-                background: radial-gradient(circle, var(--bg-surface) 0%, transparent 70%);
-                cursor: pointer;
-                position: relative;
-                z-index: 10;
-            }
-
-            .portal-zone:hover,
-            .portal-zone.dragover {
-                border-color: var(--accent);
-                box-shadow: 0 0 40px var(--accent-glow);
-                transform: scale(1.05);
-            }
-
-            .portal-ring {
-                position: absolute;
-                inset: -15px;
-                border-radius: 50%;
-                border: 1px solid var(--accent);
-                opacity: 0.3;
-                animation: spin 10s linear infinite;
-                pointer-events: none;
-            }
-
             @keyframes spin {
                 from {
                     transform: rotate(0deg);
@@ -694,122 +582,36 @@
                 }
             }
 
-            /* Transfer List */
-            .transfers-header {
-                padding: 1.5rem;
-                font-weight: 700;
-                font-size: 1.1rem;
-                border-bottom: 1px solid var(--border-light);
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-
-            .transfers-panel {
-                flex: 1;
-                overflow-y: auto;
-                padding: 1.5rem;
-                width: 100%;
-                display: flex;
-                flex-direction: column;
-                gap: 1rem;
-            }
-
-            .file-card-modern {
-                background: var(--bg-surface);
-                border-radius: 16px;
-                padding: 1rem;
-                margin-bottom: 1rem;
-                border: 1px solid var(--border-light);
-                display: flex;
-                align-items: center;
-                gap: 1rem;
-                position: relative;
-                overflow: hidden;
-            }
-
-            .progress-bg {
-                position: absolute;
-                left: 0;
-                bottom: 0;
-                height: 3px;
-                background: var(--accent);
-                transition: width 0.3s;
-            }
-
-            /* Stats Floating Pill */
-            .stats-floater {
-                position: fixed;
-                bottom: 2rem;
-                left: 50%;
-                transform: translateX(-50%);
-                background: rgba(15, 23, 42, 0.8);
-                backdrop-filter: blur(12px);
-                padding: 0.75rem 1.5rem;
-                border-radius: 50px;
-                display: flex;
-                gap: 1.5rem;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                color: white;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-                z-index: 100;
-            }
-
-            .stat-mini {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                line-height: 1;
-            }
-
-            .stat-mini-val {
-                font-weight: bold;
-                font-size: 0.9rem;
-            }
-
-            .stat-mini-lbl {
-                font-size: 0.6rem;
-                opacity: 0.7;
-                text-transform: uppercase;
-                margin-top: 2px;
-            }
-
             /* Mobile Responsive */
             @media (max-width: 900px) {
                 .main-stage {
-                    flex-direction: column;
+                    grid-template-columns: 1fr;
                 }
 
                 .right-pane {
-                    width: 100%;
-                    flex: 1;
                     border-left: none;
                     border-top: 1px solid var(--border-light);
                 }
 
                 .left-pane {
-                    flex: 0 0 auto;
-                    padding: 2rem 0.75rem;
+                    padding: 1.5rem;
+                }
+
+                .room-cta {
+                    position: static;
                 }
 
                 .portal-zone {
-                    width: 230px;
-                    height: 230px;
+                    width: 100%;
+                    max-width: 500px;
                 }
 
                 .dashboard-header {
-                    padding: 0.75rem 1rem;
+                    padding: 0.9rem 1.1rem;
                 }
 
                 .btn-icon-text span {
                     display: none;
-                }
-
-                /* Hide text on mobile buttons */
-                .stats-floater {
-                    width: 90%;
-                    justify-content: space-around;
-                    bottom: 1rem;
                 }
             }
 
@@ -831,16 +633,7 @@
                 }
 
                 .portal-zone {
-                    width: 200px;
-                    height: 200px;
-                }
-
-                .stats-floater {
-                    width: calc(100vw - 1rem) !important;
-                    left: 0 !important;
-                    transform: none !important;
-                    padding: 0.65rem 1rem;
-                    gap: 1rem;
+                    border-radius: 20px;
                 }
             }
         </style>
@@ -850,20 +643,22 @@
 
             <!-- Header -->
             <header class="dashboard-header">
-                <a href="/" class="logo">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
-                    </svg>
-                    <span style="font-weight: 700; margin-left: 0.5rem;">Velo</span>
-                </a>
+                <div class="header-left">
+                    <a href="/" class="logo">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                            <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" />
+                        </svg>
+                        <span style="font-weight: 700; margin-left: 0.5rem;">Velo</span>
+                    </a>
+                    <span class="header-meta-chip">Room active</span>
+                </div>
 
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;">
-                    <button class="btn-ghost btn-icon-text" id="copyPeerId"
-                        style="padding: 0.5rem 1rem; border-radius: 50px;">
-                        <span>ID: </span><b id="myPeerId" style="margin: 0 0.5rem;">...</b> 📋
+                <div class="header-actions">
+                    <button class="btn-ghost btn-icon-text" id="copyPeerId" title="Copy Peer ID">
+                        <span>ID:</span><b id="myPeerId" style="margin: 0 0.35rem;">...</b> 📋
                     </button>
-                    <button class="btn-ghost" id="showQrBtn"
-                        style="width: 40px; height: 40px; padding: 0; border-radius: 50%;" title="Show QR Code">
+                    <button class="btn-ghost icon-btn" id="showQrBtn" title="Show QR Code"
+                        style="border-radius: 12px;">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <rect x="3" y="3" width="7" height="7" />
@@ -872,9 +667,7 @@
                             <rect x="3" y="14" width="7" height="7" />
                         </svg>
                     </button>
-                    <button class="btn-primary" id="shareBtn"
-                        style="padding: 0.5rem 1rem; border-radius: 50px; display: flex; align-items: center; gap: 0.5rem;"
-                        title="Share Link">
+                    <button class="btn-primary" id="shareBtn" title="Share Link">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <circle cx="18" cy="5" r="3" />
@@ -886,9 +679,7 @@
                         <span class="desktop-only">Share</span>
                     </button>
                     <button class="btn-ghost" id="shareTextBtn"
-                        style="padding: 0.5rem 1rem; border-radius: 50px; display: flex; align-items: center; gap: 0.5rem;
-                               border-color: var(--accent-glow); color: var(--accent);"
-                        title="Share Clipboard Text">
+                        style="border-color: var(--accent-glow); color: var(--accent);" title="Share Clipboard Text">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M9 11h6" />
@@ -898,7 +689,7 @@
                         <span class="desktop-only">Share Text</span>
                     </button>
                     <button class="btn-ghost" id="disconnectBtn"
-                        style="color: var(--danger); border-color: var(--danger); border-radius: 50px; padding: 0.5rem 1rem;">
+                        style="color: var(--danger); border-color: var(--danger);">
                         ✕ <span class="desktop-only">Leave</span>
                     </button>
                 </div>
@@ -920,14 +711,13 @@
                     <div class="portal-zone" id="dropZone">
                         <div class="portal-ring"></div>
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.5" style="margin-bottom: 1rem; color: var(--accent);">
+                            stroke-width="1.5" style="margin-bottom: 1rem;">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                             <polyline points="17 8 12 3 7 8" />
                             <line x1="12" y1="3" x2="12" y2="15" />
                         </svg>
-                        <h3 style="margin: 0;">Tap to Send</h3>
-                        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem;">or drag files here
-                        </p>
+                        <h3 class="portal-title">Tap or drop files</h3>
+                        <p class="portal-subtext">We’ll stream them directly—no cloud storage.</p>
                         <input type="file" id="fileInput" multiple hidden>
                     </div>
                 </div>
@@ -935,41 +725,46 @@
                 <!-- Right: Transfer Queue -->
                 <div class="right-pane">
                     <div class="transfers-header">
-                        <span>Activity</span>
+                        <div style="display: grid; gap: 0.3rem;">
+                            <span style="font-weight: 800;">Activity</span>
+                            <div class="header-meta">
+                                <span class="meta-chip" id="queueStats">Queue: 0</span>
+                                <span class="meta-chip">Live room</span>
+                                <span class="meta-chip">End-to-end</span>
+                            </div>
+                        </div>
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <span id="queueStats"
-                                style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"></span>
                             <button id="pauseQueueBtn" class="queue-ctrl-btn" title="Pause Queue"
-                                style="background: var(--bg-main); border: none; padding: 0.3rem 0.6rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.8rem;">
+                                style="background: var(--bg-main); border: none; padding: 0.45rem 0.65rem; border-radius: 10px; cursor: pointer; color: var(--text-primary); font-size: 0.9rem;">
                                 ⏸️
                             </button>
                             <button id="clearQueueBtn" class="queue-ctrl-btn" title="Clear Queue"
-                                style="background: var(--bg-main); border: none; padding: 0.3rem 0.6rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.8rem;">
+                                style="background: var(--bg-main); border: none; padding: 0.45rem 0.65rem; border-radius: 10px; cursor: pointer; color: var(--text-primary); font-size: 0.9rem;">
                                 🗑️
                             </button>
                         </div>
                     </div>
+
                     <div class="transfers-panel" id="transferQueue">
                         <!-- Transfers appear here -->
                     </div>
+
+                    <div class="stats-floater">
+                        <div class="stat-mini">
+                            <span class="stat-mini-val" id="liveSpeed">0 MB/s</span>
+                            <span class="stat-mini-lbl">Speed</span>
+                        </div>
+                        <div class="stat-mini">
+                            <span class="stat-mini-val" id="peakSpeedStat">0 MB/s</span>
+                            <span class="stat-mini-lbl">Peak</span>
+                        </div>
+                        <div class="stat-mini">
+                            <span class="stat-mini-val" id="connectionStatus">Ready</span>
+                            <span class="stat-mini-lbl">Status</span>
+                        </div>
+                    </div>
                 </div>
 
-            </div>
-
-            <!-- Floating Stats -->
-            <div class="stats-floater">
-                <div class="stat-mini">
-                    <span class="stat-mini-val" id="liveSpeed">0 MB/s</span>
-                    <span class="stat-mini-lbl">Speed</span>
-                </div>
-                <div class="stat-mini">
-                    <span class="stat-mini-val" id="peakSpeedStat">0 MB/s</span>
-                    <span class="stat-mini-lbl">Peak</span>
-                </div>
-                <div class="stat-mini">
-                    <span class="stat-mini-val" id="connectionStatus">Ready</span>
-                    <span class="stat-mini-lbl">Status</span>
-                </div>
             </div>
 
         </div>
