@@ -51,14 +51,23 @@ Velo uses [PeerJS](https://peerjs.com/) for WebRTC signaling. When you host:
 ## 📁 Project Structure
 
 ```
-public/
-├── index.html      # Landing page
-├── app.html        # Main application
-├── css/
-│   └── style.css   # Design system
-└── js/
-    ├── theme.js    # Light/Dark mode
-    └── velo-app.js # Main app logic (PeerJS)
+Structure:
+└── prathamtagad-velo-share/
+    ├── README.md
+    ├── package.json
+    ├── server.js
+    └── public/
+        ├── about.html
+        ├── app.html
+        ├── index.html
+        ├── manifest.json
+        ├── privacy.html
+        ├── sw.js
+        ├── terms.html
+        ├── css/
+        │   └── style.css
+        └── js/
+            └── theme.js
 ```
 
 ## 🎨 Tech Stack
