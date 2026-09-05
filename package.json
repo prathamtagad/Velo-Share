@@ -1,10 +1,11 @@
 {
   "name": "velo",
-  "version": "2.0.0",
-  "description": "Velo - Instant P2P File Transfer. Deploy anywhere.",
+  "version": "2.1.0",
+  "description": "Velo - Production-Grade P2P File Transfer with WebRTC, STUN/TURN, and SHA-256 Integrity Verification.",
   "private": true,
   "scripts": {
     "dev": "npx serve public",
-    "start": "npx serve public"
+    "start": "npx serve public",
+    "test": "node test/test-suite.js"
   }
 }

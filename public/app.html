@@ -377,6 +377,11 @@
                         <span class="pill">Encrypted</span>
                         <span class="pill">No limits</span>
                     </div>
+                    <div style="margin-top: 0.75rem; display: flex; justify-content: center;">
+                        <button id="landingNetworkBtn" class="btn-ghost" style="font-size: 0.8rem; padding: 0.35rem 0.85rem; border-radius: 999px;">
+                            ⚙️ Network & TURN Settings
+                        </button>
+                    </div>
                 </div>
 
                 <div class="landing-grid">
@@ -689,6 +694,10 @@
                         </svg>
                         <span class="desktop-only">Share Text</span>
                     </button>
+                    <button class="btn-ghost" id="networkSettingsBtn" title="Network & TURN Settings"
+                        style="border-radius: 12px;">
+                        ⚙️ <span class="desktop-only">Network</span>
+                    </button>
                     <button class="btn-ghost" id="disconnectBtn"
                         style="color: var(--danger); border-color: var(--danger);">
                         ✕ <span class="desktop-only">Leave</span>
@@ -791,6 +800,8 @@
             </div>
         </div>
 
+        <!-- Network Configuration -->
+        <script src="js/config.js"></script>
         <!-- PeerJS Library -->
         <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
         <!-- QR Code Library -->
