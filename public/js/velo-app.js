@@ -46,6 +46,8 @@ const ProtocolConstants = {
     MAX_AGGREGATE_RECEIVE_BUFFER: 512 * 1024 * 1024, // total bytes buffered across receives
     MAX_CONNECTIONS: 16,               // concurrent peer connections
     MAX_QUEUED_FILES: 50,
+    MAX_RETAINED_QUEUE_ITEMS: 200,   // terminal queue entries kept for UI stats
+    MAX_TRANSFER_CARDS: 50,          // transfer cards kept in the DOM
     RECEIVE_IDLE_TIMEOUT_MS: 30000,    // no chunk progress for 30s -> stall cleanup
     CONSENT_TIMEOUT_MS: 60000,         // unanswered incoming-file consent -> auto-decline
     FILE_ACCEPT_TIMEOUT_MS: 60000,     // sender gives up on receivers that never accept
@@ -589,17 +591,18 @@ class VeloApp {
             });
         }
 
-        // Queue Controls
+        // Queue Controls. Pause means: the CURRENT transfer keeps running, but
+        // the next queued file will not start until resumed.
         if (this.pauseQueueBtn) {
             this.pauseQueueBtn.addEventListener('click', () => {
                 if (this.isPaused) {
                     this.resumeQueue();
                     this.pauseQueueBtn.textContent = '⏸️';
-                    this.pauseQueueBtn.title = 'Pause Queue';
+                    this.pauseQueueBtn.title = 'Hold queue: finish current file, don\'t start the next';
                 } else {
                     this.pauseQueue();
                     this.pauseQueueBtn.textContent = '▶️';
-                    this.pauseQueueBtn.title = 'Resume Queue';
+                    this.pauseQueueBtn.title = 'Resume queue';
                 }
             });
         }
@@ -1069,6 +1072,11 @@ class VeloApp {
             this.playSound('connect');
             this.showToast(`${cleanUsername} connected!`, 'success');
 
+            // Read the selected candidate pair now (and on later ICE changes)
+            // so the pill shows host/srflx/relay instead of [unknown] forever.
+            this.updatePeerDiagnosticState(remotePeerId);
+            setTimeout(() => this.updatePeerDiagnosticState(remotePeerId), 1500);
+
             // Send handshake
             conn.send({
                 type: 'handshake',
@@ -1176,8 +1184,9 @@ class VeloApp {
                 stats.forEach(report => {
                     if (report.type === 'candidate-pair' && report.state === 'succeeded') {
                         const localCandidate = stats.get(report.localCandidateId);
-                        if (localCandidate) {
+                        if (localCandidate && localCandidate.candidateType) {
                             info.candidateType = localCandidate.candidateType; // 'host' | 'srflx' | 'relay'
+                            this.updatePeerList();
                         }
                     }
                 });
@@ -1460,7 +1469,26 @@ class VeloApp {
 
         nextItem.status = 'sending';
         this.updateQueueUI();
+        nextItem.transferId = null; // set by sendFile once generated
         this.sendFile(nextItem.file, nextItem.id);
+    }
+
+    /**
+     * Drops the oldest terminal (completed/failed/cancelled) queue entries and
+     * nulls their File references so memory doesn't grow without bound.
+     */
+    pruneFinishedQueueItems() {
+        const terminal = this.queuedFiles.filter(i => i.status !== 'pending' && i.status !== 'sending');
+        const excess = terminal.length - ProtocolConstants.MAX_RETAINED_QUEUE_ITEMS;
+        if (excess <= 0) return;
+        const toDrop = new Set(terminal.slice(0, excess));
+        this.queuedFiles = this.queuedFiles.filter(i => {
+            if (toDrop.has(i)) {
+                i.file = null;
+                return false;
+            }
+            return true;
+        });
     }
 
     getTargetConnections() {
@@ -1553,6 +1581,10 @@ class VeloApp {
             };
 
             this.activeSends.set(transferId, transferRecord);
+            if (queueId) {
+                const item = this.queuedFiles.find(i => i.id === queueId);
+                if (item) item.transferId = transferId;
+            }
             this.addTransferToUI(transferId, safeName, file.size, 'send');
 
             // 2. Send Control Header (file-start) to all target peers
@@ -1983,6 +2015,7 @@ class VeloApp {
 
         this.activeSends.delete(transferId);
         this.updateQueueUI();
+        this.pruneFinishedQueueItems();
 
         // Release queue lock and process next
         this.isSending = false;
@@ -2573,7 +2606,7 @@ class VeloApp {
 
     pauseQueue() {
         this.isPaused = true;
-        this.showToast('Transfer queue paused', 'info');
+        this.showToast('Queue on hold: the current file continues, new files wait', 'info');
         this.updateQueueUI();
     }
 
@@ -2585,7 +2618,25 @@ class VeloApp {
     }
 
     clearQueue() {
+        // Remove stale transfer cards for the items being dropped so the DOM
+        // doesn't accumulate dead entries.
+        this.queuedFiles.forEach(item => {
+            if (item.status !== 'sending') {
+                item.file = null; // release File reference
+                if (item.transferId) this.removeTransferFromUI(item.transferId);
+            }
+        });
         this.queuedFiles = this.queuedFiles.filter(item => item.status === 'sending');
+
+        // Also cap completed/failed terminal cards to bound DOM growth
+        if (this.transferQueue && this.transferQueue.children.length > ProtocolConstants.MAX_TRANSFER_CARDS) {
+            const excess = this.transferQueue.children.length - ProtocolConstants.MAX_TRANSFER_CARDS;
+            // Oldest cards are at the end (new cards are inserted at the top)
+            for (let i = 0; i < excess; i++) {
+                this.transferQueue.lastChild.remove();
+            }
+        }
+
         this.showToast('Pending queue cleared', 'info');
         this.updateQueueUI();
     }
@@ -2692,7 +2743,11 @@ class VeloApp {
 
         results.latency = Math.max(1, pingResult.latency);
 
-        // 2. Measure Upload (send 1MB test binary)
+        // 2. Measure Upload (send 1MB test binary).
+        //    Single-clock measurement: the SENDER times the whole round trip
+        //    (data out + result back) on its own clock. No timestamps from the
+        //    remote machine are subtracted, so clock skew cannot corrupt the
+        //    result. The UI labels this as a round-trip estimate.
         const testDataSize = 1024 * 1024; // 1MB
         const testData = new Uint8Array(testDataSize);
         crypto.getRandomValues(testData.subarray(0, 1024)); // Seed partial
@@ -2713,9 +2768,13 @@ class VeloApp {
             new Promise(r => setTimeout(() => r({ timeout: true }), 8000))
         ]);
 
-        if (!uploadResult?.timeout && !uploadResult?.error && uploadResult.receivedAt) {
-            const uploadTimeSec = Math.max(0.01, (uploadResult.receivedAt - uploadStart) / 1000);
-            results.uploadSpeed = testDataSize / uploadTimeSec;
+        if (!uploadResult?.timeout && !uploadResult?.error) {
+            // Single clock: the entire round trip (1MB out + result back) is
+            // measured on the sender's clock. No remote timestamps are used.
+            const roundTripMs = Date.now() - uploadStart;
+            const oneWaySec = Math.max(0.01, roundTripMs / 2 / 1000);
+            results.uploadSpeed = testDataSize / oneWaySec;
+            results.roundTripMs = roundTripMs;
         }
 
         this.cleanupSpeedTest(peerId);
@@ -2756,12 +2815,13 @@ class VeloApp {
             return;
         }
         if (!testEntry) {
-            testEntry = { testId: data.testId, expectingTestData: true, timestamp: data.timestamp };
+            testEntry = { testId: data.testId, expectingTestData: true, timestamp: data.timestamp, headerAt: Date.now() };
             this.activeSpeedTests.set(peerId, testEntry);
         } else {
             testEntry.expectingTestData = true;
             testEntry.timestamp = data.timestamp;
             testEntry.testId = data.testId;
+            testEntry.headerAt = Date.now();
         }
     }
 
@@ -2774,6 +2834,9 @@ class VeloApp {
         }
 
         testEntry.expectingTestData = false;
+        // Receiver-local interval between the control header and the binary
+        // payload — measured on this machine's clock only.
+        const localIntervalMs = testEntry.headerAt ? Date.now() - testEntry.headerAt : null;
         const conn = this.connections.get(peerId)?.conn;
         if (conn) {
             try {
@@ -2781,7 +2844,8 @@ class VeloApp {
                     type: 'speed-test-result',
                     testId: testEntry.testId,
                     originalTimestamp: testEntry.timestamp,
-                    receivedAt: Date.now()
+                    receivedAt: Date.now(),
+                    measuredIntervalMs: localIntervalMs
                 });
             } catch (e) {}
         }
@@ -2790,7 +2854,7 @@ class VeloApp {
     handleSpeedTestResult(peerId, data) {
         const testEntry = this.activeSpeedTests.get(peerId);
         if (testEntry && testEntry.testId === data.testId && testEntry.uploadResolve) {
-            testEntry.uploadResolve({ receivedAt: data.receivedAt });
+            testEntry.uploadResolve({ ok: true });
             testEntry.uploadResolve = null;
         }
     }
@@ -2820,41 +2884,64 @@ class VeloApp {
     }
 
     updateGlobalStats() {
-        let totalCurrentSpeed = 0;
+        let totalCurrentSpeed = 0; // aggregate throughput across ALL transfers
         const now = Date.now();
 
-        // 1. Calculate speeds for active sends
+        // 1. Active sends: per-peer progress/ETA driven by the SLOWEST active
+        //    peer; aggregate speed kept separate.
         this.activeSends.forEach((transfer, id) => {
+            const elapsed = (now - (transfer.lastSpeedCheck || transfer.startTime)) / 1000;
+            if (elapsed <= 0.4) return;
+
             let transferTransferred = 0;
+            let slowestPeerSpeed = Infinity;
+
             transfer.peers.forEach(peerState => {
                 transferTransferred += peerState.transferred;
+
+                if (peerState.status === 'sending') {
+                    const peerDelta = peerState.transferred - (peerState.lastBytes || 0);
+                    const peerSpeed = peerDelta / elapsed;
+                    if (peerSpeed > 0) {
+                        slowestPeerSpeed = Math.min(slowestPeerSpeed, peerSpeed);
+                    }
+                }
+                peerState.lastBytes = peerState.transferred;
             });
 
-            const elapsed = (now - (transfer.lastSpeedCheck || transfer.startTime)) / 1000;
-            if (elapsed > 0.4) {
-                const bytesDelta = transferTransferred - (transfer.lastSpeedBytes || 0);
-                const currentSpeed = bytesDelta / elapsed;
-                totalCurrentSpeed += currentSpeed;
+            const bytesDelta = transferTransferred - (transfer.lastSpeedBytes || 0);
+            const aggregateSpeed = bytesDelta / elapsed;
+            totalCurrentSpeed += aggregateSpeed;
 
-                transfer.lastSpeedBytes = transferTransferred;
-                transfer.lastSpeedCheck = now;
+            transfer.lastSpeedBytes = transferTransferred;
+            transfer.lastSpeedCheck = now;
 
-                this.updateTransferStatUI(id, currentSpeed, transfer.size - transferTransferred);
-            }
+            // ETA from the slowest ACTIVE peer (not the aggregate), so one fast
+            // peer doesn't make a broadcast look nearly done.
+            const remainingWorst = Math.max(0, transfer.size - Math.min(
+                ...Array.from(transfer.peers.values())
+                    .filter(p => p.status === 'sending')
+                    .map(p => p.transferred)
+                    .concat([transfer.size]) // avoid empty Math.min
+            ));
+            this.updateTransferStatUI(id, aggregateSpeed, remainingWorst, slowestPeerSpeed !== Infinity ? slowestPeerSpeed : null);
         });
 
-        // 2. Calculate speeds for active receives
-        this.activeReceives.forEach((receive, id) => {
+        // 2. Active receives: pass the TRANSFER id — the DOM elements are keyed
+        //    by transferId, not the composite map key.
+        this.activeReceives.forEach((receive) => {
             const elapsed = (now - (receive.lastSpeedCheck || receive.startTime)) / 1000;
-            if (elapsed > 0.4) {
-                const bytesDelta = receive.receivedBytes - (receive.lastSpeedBytes || 0);
-                const currentSpeed = bytesDelta / elapsed;
-                totalCurrentSpeed += currentSpeed;
+            if (elapsed <= 0.4) return;
 
-                receive.lastSpeedBytes = receive.receivedBytes;
-                receive.lastSpeedCheck = now;
+            const bytesDelta = receive.receivedBytes - (receive.lastSpeedBytes || 0);
+            const currentSpeed = bytesDelta / elapsed;
+            totalCurrentSpeed += currentSpeed;
 
-                this.updateTransferStatUI(id, currentSpeed, receive.size - receive.receivedBytes);
+            receive.lastSpeedBytes = receive.receivedBytes;
+            receive.lastSpeedCheck = now;
+
+            if (receive.state === 'receiving') {
+                this.updateTransferStatUI(receive.transferId, currentSpeed, receive.size - receive.receivedBytes);
             }
         });
 
@@ -2870,15 +2957,16 @@ class VeloApp {
         }
     }
 
-    updateTransferStatUI(id, speedBytesPerSec, bytesRemaining) {
+    updateTransferStatUI(id, speedBytesPerSec, bytesRemaining, slowestPeerSpeed = null) {
         const speedEl = document.getElementById(`speed-${id}`);
         const etaEl = document.getElementById(`eta-${id}`);
 
         if (speedEl) {
             speedEl.textContent = this.formatSpeed(speedBytesPerSec);
         }
-        if (etaEl && speedBytesPerSec > 0) {
-            etaEl.textContent = this.formatTime(bytesRemaining / speedBytesPerSec);
+        if (etaEl) {
+            const etaSpeed = slowestPeerSpeed !== null && slowestPeerSpeed > 0 ? slowestPeerSpeed : speedBytesPerSec;
+            etaEl.textContent = etaSpeed > 0 ? this.formatTime(bytesRemaining / etaSpeed) : '--';
         }
     }
 
@@ -2921,10 +3009,13 @@ class VeloApp {
         if (!this.peerList) return;
         this.peerList.textContent = ''; // Safe clear
 
-        // 1. "Add Peer" pill
+        // 1. "Add Peer" pill — keyboard focusable, inline input instead of prompt()
         const addPill = document.createElement('div');
         addPill.className = 'peer-pill';
         addPill.style.cursor = 'pointer';
+        addPill.setAttribute('role', 'button');
+        addPill.setAttribute('tabindex', '0');
+        addPill.setAttribute('aria-label', 'Add a peer by ID');
 
         const addAvatar = document.createElement('div');
         addAvatar.className = 'peer-pill-avatar';
@@ -2936,9 +3027,37 @@ class VeloApp {
         addText.textContent = 'Add';
         addPill.appendChild(addText);
 
-        addPill.onclick = () => {
-            const id = prompt('Enter Peer ID to connect:');
-            if (id) this.connectToPeer(id.toUpperCase().trim());
+        const openAddPeerInput = () => {
+            addPill.textContent = '';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = 'VELO-XXXX…';
+            input.setAttribute('aria-label', 'Peer ID to connect');
+            input.style.cssText = 'background: var(--bg-main); border: 1px solid var(--border-light); border-radius: 8px; padding: 0.35rem 0.6rem; color: var(--text-primary); font-family: monospace; font-size: 0.8rem; width: 150px; outline: none; text-transform: uppercase;';
+            addPill.appendChild(input);
+            input.focus();
+
+            const submit = () => {
+                const id = input.value.trim();
+                if (id) this.connectToPeer(id);
+                this.updatePeerList();
+            };
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') submit();
+                if (e.key === 'Escape') this.updatePeerList();
+                e.stopPropagation();
+            });
+            input.addEventListener('blur', () => {
+                // Give Enter a chance to run first
+                setTimeout(() => {
+                    if (document.activeElement !== input) this.updatePeerList();
+                }, 150);
+            });
+        };
+        addPill.onclick = openAddPeerInput;
+        addPill.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAddPeerInput(); }
         };
         this.peerList.appendChild(addPill);
 
@@ -2949,6 +3068,8 @@ class VeloApp {
 
             const pill = document.createElement('div');
             pill.className = `peer-pill active ${isSelected ? 'selected' : ''}`;
+            pill.setAttribute('tabindex', '0');
+            pill.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
             if (isSelected) {
                 pill.style.borderColor = 'var(--accent)';
                 pill.style.background = 'rgba(52, 211, 153, 0.1)';
@@ -2959,6 +3080,7 @@ class VeloApp {
             checkbox.type = 'checkbox';
             checkbox.className = 'peer-select-checkbox';
             checkbox.checked = isSelected;
+            checkbox.setAttribute('aria-label', `Select ${peerInfo.username} as send target`);
             checkbox.style.cssText = 'width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer;';
             checkbox.onclick = (e) => {
                 e.stopPropagation();
@@ -2978,7 +3100,7 @@ class VeloApp {
 
             const nameRow = document.createElement('div');
             nameRow.style.cssText = 'font-weight: 600; line-height: 1; display: flex; align-items: center;';
-            
+
             const nameText = document.createElement('span');
             nameText.textContent = peerInfo.username;
             nameRow.appendChild(nameText);
@@ -2990,7 +3112,7 @@ class VeloApp {
                 nameRow.appendChild(badge);
             }
 
-            if (peerInfo.candidateType) {
+            if (peerInfo.candidateType && peerInfo.candidateType !== 'unknown') {
                 const candBadge = document.createElement('span');
                 candBadge.style.cssText = 'font-size: 0.6rem; opacity: 0.7; margin-left: 0.35rem;';
                 candBadge.textContent = `[${peerInfo.candidateType}]`;
@@ -3011,12 +3133,25 @@ class VeloApp {
             speedBtn.className = 'speed-test-btn';
             speedBtn.style.cssText = 'background: var(--bg-main); border: none; padding: 0.3rem 0.5rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.75rem;';
             speedBtn.title = 'Test Connection Speed';
+            speedBtn.setAttribute('aria-label', `Test connection speed to ${peerInfo.username}`);
             speedBtn.textContent = '⚡';
             speedBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.runSpeedTest(peerId);
             };
             pill.appendChild(speedBtn);
+
+            // Block/disconnect button (abuse control)
+            const blockBtn = document.createElement('button');
+            blockBtn.style.cssText = 'background: var(--bg-main); border: none; padding: 0.3rem 0.5rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.75rem;';
+            blockBtn.title = 'Block this peer';
+            blockBtn.setAttribute('aria-label', `Block ${peerInfo.username}`);
+            blockBtn.textContent = '⛔';
+            blockBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.blockPeer(peerId);
+            };
+            pill.appendChild(blockBtn);
 
             this.peerList.appendChild(pill);
         });
@@ -3026,14 +3161,18 @@ class VeloApp {
             const togglePill = document.createElement('div');
             togglePill.className = 'peer-pill';
             togglePill.style.cssText = 'background: var(--bg-main); cursor: pointer;';
+            togglePill.setAttribute('role', 'button');
+            togglePill.setAttribute('tabindex', '0');
 
             const toggleSpan = document.createElement('span');
             toggleSpan.style.cssText = 'font-size: 0.8rem; color: var(--text-muted);';
             toggleSpan.textContent = this.broadcastMode === 'all' ? '📡 Send to All' : '🎯 Send to Selected';
             togglePill.appendChild(toggleSpan);
 
-            togglePill.onclick = () => {
-                this.setBroadcastMode(this.broadcastMode === 'all' ? 'selected' : 'all');
+            const toggle = () => this.setBroadcastMode(this.broadcastMode === 'all' ? 'selected' : 'all');
+            togglePill.onclick = toggle;
+            togglePill.onkeydown = (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
             };
             this.peerList.appendChild(togglePill);
         }
@@ -3041,6 +3180,11 @@ class VeloApp {
 
     addTransferToUI(id, name, size, direction) {
         if (!this.transferQueue) return;
+
+        // Cap retained transfer cards to bound DOM growth (oldest removed)
+        while (this.transferQueue.children.length >= ProtocolConstants.MAX_TRANSFER_CARDS) {
+            this.transferQueue.lastChild.remove();
+        }
 
         const card = document.createElement('div');
         card.className = 'file-card-modern';
@@ -3794,7 +3938,7 @@ class VeloApp {
 
         const upBox = document.createElement('div');
         upBox.style.cssText = 'background: var(--bg-main); padding: 1rem; border-radius: 12px;';
-        upBox.innerHTML = '<div style="color: var(--text-muted); font-size: 0.75rem;">UPLOAD SPEED</div><div id="testUpload" style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">--</div>';
+        upBox.innerHTML = '<div style="color: var(--text-muted); font-size: 0.75rem;">THROUGHPUT (ROUND-TRIP EST.)</div><div id="testUpload" style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">--</div>';
         grid.appendChild(upBox);
 
         resultsDiv.appendChild(grid);
