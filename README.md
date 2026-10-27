@@ -1,4 +1,4 @@
-# Velo — Production P2P File Transfer
+# Velo - Production P2P File Transfer
 
 **Velo** is a high-performance, browser-based peer-to-peer file transfer engine built on WebRTC DataChannels and PeerJS. It features end-to-end cryptographic SHA-256 integrity verification, binary chunk framing with sequence numbers, a formal fail-closed receiver ACK protocol, composite transfer ownership isolation, and multi-tier STUN/TURN NAT traversal.
 

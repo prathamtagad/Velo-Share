@@ -32,9 +32,11 @@ const ProtocolConstants = {
     UUID_LENGTH: 36,
     HEADER_SIZE: 44, // 2 (magic) + 1 (ver) + 1 (uuidLen) + 36 (uuid) + 4 (seq Uint32)
     MAX_FILE_SIZE: 2 * 1024 * 1024 * 1024, // 2GB protocol ceiling (see README for per-mode limits)
-    DEFAULT_CHUNK_SIZE: 512 * 1024, // 512KB
-    MIN_CHUNK_SIZE: 128 * 1024, // 128KB
-    MAX_CHUNK_SIZE: 1024 * 1024, // 1MB
+    // Chunk sizes kept <= 256KB: with serialization 'raw' chunks go straight
+    // to RTCDataChannel.send(), which must stay under SCTP message limits.
+    DEFAULT_CHUNK_SIZE: 256 * 1024, // 256KB
+    MIN_CHUNK_SIZE: 64 * 1024, // 64KB
+    MAX_CHUNK_SIZE: 256 * 1024, // 256KB
     BACKPRESSURE_HIGH_WATERMARK: 1024 * 1024, // 1MB
     BACKPRESSURE_LOW_WATERMARK: 256 * 1024, // 256KB
     CONNECTION_TIMEOUT_MS: 15000,
@@ -167,6 +169,133 @@ async function computeSha256(data) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ==================== INCREMENTAL SHA-256 (VENDORED) ====================
+// WebCrypto has no streaming digest API; hashing a whole file required a
+// full-file ArrayBuffer copy. This vendored FIPS 180-4 implementation hashes
+// chunk-by-chunk for both sender and receiver with O(64-byte) state.
+// Correctness is verified against Node's crypto in the test suite.
+
+const SHA256_K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+
+class Sha256 {
+    constructor() {
+        this.h = new Uint32Array([
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+        ]);
+        this.buf = new Uint8Array(64);
+        this.bufLen = 0;
+        this.lenBytes = 0;
+        this._w = new Uint32Array(64);
+        this.done = false;
+    }
+
+    /** Feeds bytes (Uint8Array or ArrayBuffer) into the hash. */
+    update(data) {
+        if (this.done) throw new Error('Sha256 already digested');
+        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+        this.lenBytes += bytes.length;
+
+        let offset = 0;
+        if (this.bufLen > 0) {
+            const take = Math.min(64 - this.bufLen, bytes.length);
+            this.buf.set(bytes.subarray(0, take), this.bufLen);
+            this.bufLen += take;
+            offset = take;
+            if (this.bufLen === 64) {
+                this._block(this.buf, 0);
+                this.bufLen = 0;
+            }
+        }
+        while (offset + 64 <= bytes.length) {
+            this._block(bytes, offset);
+            offset += 64;
+        }
+        if (offset < bytes.length) {
+            this.buf.set(bytes.subarray(offset), 0);
+            this.bufLen = bytes.length - offset;
+        }
+        return this;
+    }
+
+    _block(bytes, off) {
+        const w = this._w;
+        for (let i = 0; i < 16; i++) {
+            const j = off + 4 * i;
+            w[i] = ((bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j + 2] << 8) | bytes[j + 3]) >>> 0;
+        }
+        for (let i = 16; i < 64; i++) {
+            const x = w[i - 15];
+            const y = w[i - 2];
+            const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+            const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+        }
+
+        let a = this.h[0], b = this.h[1], c = this.h[2], d = this.h[3];
+        let e = this.h[4], f = this.h[5], g = this.h[6], h = this.h[7];
+
+        for (let i = 0; i < 64; i++) {
+            const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+            const ch = (e & f) ^ (~e & g);
+            const t1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+            const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+            const mj = (a & b) ^ (a & c) ^ (b & c);
+            const t2 = (S0 + mj) >>> 0;
+            h = g; g = f; f = e;
+            e = (d + t1) >>> 0;
+            d = c; c = b; b = a;
+            a = (t1 + t2) >>> 0;
+        }
+
+        this.h[0] = (this.h[0] + a) >>> 0;
+        this.h[1] = (this.h[1] + b) >>> 0;
+        this.h[2] = (this.h[2] + c) >>> 0;
+        this.h[3] = (this.h[3] + d) >>> 0;
+        this.h[4] = (this.h[4] + e) >>> 0;
+        this.h[5] = (this.h[5] + f) >>> 0;
+        this.h[6] = (this.h[6] + g) >>> 0;
+        this.h[7] = (this.h[7] + h) >>> 0;
+    }
+
+    /** Finalizes and returns the lowercase hex digest. */
+    digest() {
+        if (this.done) throw new Error('Sha256 already digested');
+
+        const bitLenHi = Math.floor(this.lenBytes / 0x20000000);
+        const bitLenLo = (this.lenBytes % 0x20000000) * 8;
+
+        // Pad to (block boundary - 8 bytes), then append the 8-byte length so
+        // update() itself flushes the final block(s).
+        const padLen = (this.bufLen < 56 ? 64 : 128) - this.bufLen - 8;
+        const pad = new Uint8Array(padLen);
+        pad[0] = 0x80;
+        this.update(pad); // lenBytes is no longer read after snapshot above
+
+        const tail = new Uint8Array(8);
+        const tailView = new DataView(tail.buffer);
+        tailView.setUint32(0, bitLenHi, false);
+        tailView.setUint32(4, bitLenLo, false);
+        this.update(tail);
+
+        this.done = true;
+        let out = '';
+        for (let i = 0; i < 8; i++) {
+            out += this.h[i].toString(16).padStart(8, '0');
+        }
+        return out;
+    }
+}
+
 // ==================== UNIQUE ID GENERATOR ====================
 
 /**
@@ -273,7 +402,7 @@ function validateFileStartMetadata(data) {
         return { valid: false, error: msg, reason: msg };
     }
 
-    // sha256: MANDATORY — exact 64-character lowercase hex string.
+    // sha256: MANDATORY - exact 64-character lowercase hex string.
     // A transfer without a verifiable digest is rejected outright (fail closed).
     if (typeof data.sha256 !== 'string' || !SHA256_REGEX.test(data.sha256.toLowerCase())) {
         const msg = 'Missing or malformed SHA-256 digest (mandatory for all transfers)';
@@ -462,7 +591,7 @@ class VeloApp {
         this.inboundAttemptTimestamps = []; // inbound connection rate limiting
 
         // Text Sharing
-        // Direct sends are fire-and-forget to the current target set — never
+        // Direct sends are fire-and-forget to the current target set - never
         // retained for future peers.
         // activeTextLink: one-time token for link-based sharing:
         // { token, text, expiresAt, used }
@@ -908,9 +1037,13 @@ class VeloApp {
         logger.info('Initiating outbound connection to:', targetId);
         this.showToast(`Connecting to ${targetId}...`, 'info');
 
-        // Establish connection with reliable DataChannel semantics
+        // Establish connection with reliable DataChannel semantics.
+        // serialization 'raw': binary chunks go straight to the data channel
+        // (no PeerJS binary-pack re-encode); control objects are JSON-encoded
+        // by the send wrapper installed in setupConnectionHandlers.
         const conn = this.peer.connect(targetId, {
             reliable: true,
+            serialization: 'raw',
             metadata: {
                 username: this.myUsername,
                 textShareToken: this.textShareTokenFromUrl
@@ -1023,6 +1156,19 @@ class VeloApp {
      */
     setupConnectionHandlers(conn, isIncoming) {
         const remotePeerId = conn.peer;
+
+        // With serialization 'raw', structured objects must be encoded by us:
+        // wrap conn.send so any plain object is JSON.stringify'd while
+        // ArrayBuffers / typed arrays / Blobs / strings pass through untouched.
+        const origSend = conn.send.bind(conn);
+        const isBinary = (p) => p instanceof ArrayBuffer || ArrayBuffer.isView(p) ||
+            (typeof Blob !== 'undefined' && p instanceof Blob);
+        conn.send = (payload) => {
+            if (payload !== null && typeof payload === 'object' && !isBinary(payload)) {
+                return origSend(JSON.stringify(payload));
+            }
+            return origSend(payload);
+        };
 
         conn.on('open', () => {
             // A newer connection may have replaced this one while it was
@@ -1337,7 +1483,18 @@ class VeloApp {
             return;
         }
 
-        // 2. Validate Structured JSON Message
+        // 2. Decode incoming control messages (serialization 'raw' delivers
+        //    our JSON.stringify'd control objects as strings).
+        if (typeof data === 'string') {
+            try {
+                data = JSON.parse(data);
+            } catch (e) {
+                logger.warn(`Received non-JSON string message from ${peerId} (${data.length} chars)`);
+                return;
+            }
+        }
+
+        // 3. Validate Structured JSON Message
         if (!data || typeof data !== 'object' || typeof data.type !== 'string') {
             logger.warn('Received invalid non-object protocol message from:', peerId);
             return;
@@ -1529,11 +1686,18 @@ class VeloApp {
             const totalChunks = Math.ceil(file.size / chunkSize) || 1;
             const now = Date.now();
 
-            // 1. Compute SHA-256 Checksum before or during transfer
+            // 1. Compute SHA-256 with the incremental hasher: the file is
+            //    streamed in slices and NEVER materialized as one ArrayBuffer
+            //    (the old computeSha256(file) copied the entire file into RAM).
             this.showToast(`Preparing ${safeName}...`, 'info');
             let sha256Hex = '';
             try {
-                sha256Hex = await computeSha256(file);
+                const hasher = new Sha256();
+                const hashSlice = 4 * 1024 * 1024; // 4MB read slices
+                for (let off = 0; off < file.size; off += hashSlice) {
+                    hasher.update(await file.slice(off, Math.min(off + hashSlice, file.size)).arrayBuffer());
+                }
+                sha256Hex = hasher.digest();
             } catch (err) {
                 logger.error('Failed to compute SHA-256 for file:', err);
                 this.showToast(`Failed to compute file checksum for "${safeName}"`, 'error');
@@ -1626,20 +1790,95 @@ class VeloApp {
                 }
             }, ProtocolConstants.FILE_ACCEPT_TIMEOUT_MS);
 
-            // 3. Sequential Chunk Streaming with Backpressure.
+            // 3. Streaming with prefetch and event-driven per-peer flow control.
             // Chunks are sent ONLY to peers that accepted (status 'sending');
-            // one slow or silent peer never blocks the others.
-            const reader = new FileReader();
-            transferRecord.reader = reader;
+            // one slow or silent peer never blocks the others. Each peer drains
+            // its own outbound queue driven by the dataChannel
+            // 'bufferedamountlow' event - no 15ms polling.
+            const HIGH = ProtocolConstants.BACKPRESSURE_HIGH_WATERMARK;
+            const LOW = ProtocolConstants.BACKPRESSURE_LOW_WATERMARK;
+            const SEND_WINDOW = 8; // max unread chunks queued per peer (shared buffers)
+
             let chunkIndex = 0;
             let offset = 0;
-            let readInFlight = false;
-            let pollScheduled = false;
+            let eof = false;
+            let readLoopRunning = false;
+            let footerSent = false;
 
             const acceptedPeers = () => Array.from(peersMap.entries()).filter(([, p]) => p.status === 'sending');
             const hasAwaitingPeers = () => Array.from(peersMap.values()).some(p => p.status === 'awaiting-accept');
 
+            const getDataChannel = (peerId, peerState) => {
+                const connObj = this.connections.get(peerId);
+                if (!connObj || !connObj.conn || !connObj.conn.dataChannel || connObj.conn.dataChannel.readyState !== 'open') {
+                    peerState.status = 'failed';
+                    peerState.error = 'Data channel closed';
+                    return null;
+                }
+                return connObj.conn.dataChannel;
+            };
+
+            /**
+             * Drains one peer's outbound queue while its SCTP buffer is below
+             * the high watermark; parks on the 'bufferedamountlow' event when
+             * full. Returns true when the peer's queue is fully drained.
+             */
+            const pumpPeer = (peerId, peerState) => {
+                if (peerState.status !== 'sending' || !peerState.queue) return true;
+
+                const dc = getDataChannel(peerId, peerState);
+                if (!dc) {
+                    peerState.queue.length = 0;
+                    this.checkTransferCompletion(transferId);
+                    return true;
+                }
+
+                // Event-driven backpressure: notify us once the buffer drains
+                // to the low watermark (fires at most once per crossing).
+                if (typeof dc.bufferedAmountLowThreshold === 'number') {
+                    dc.bufferedAmountLowThreshold = LOW;
+                }
+                if (!peerState.lowListenerAttached) {
+                    peerState.lowListenerAttached = true;
+                    dc.addEventListener('bufferedamountlow', () => {
+                        const ps = peersMap.get(peerId);
+                        if (ps && ps.status === 'sending') pumpPeer(peerId, ps);
+                        maybeSendFooter();
+                    });
+                }
+
+                while (peerState.queue.length > 0 && (dc.bufferedAmount || 0) < HIGH) {
+                    const item = peerState.queue.shift();
+                    try {
+                        dc.send(item.framed);
+                        peerState.transferred += item.size;
+                    } catch (err) {
+                        logger.error(`Error sending chunk to ${peerId}:`, err);
+                        peerState.status = 'failed';
+                        peerState.error = err.message;
+                        peerState.queue.length = 0;
+                        this.checkTransferCompletion(transferId);
+                        return true;
+                    }
+                }
+
+                // Buffer still above the high watermark with data queued: the
+                // 'bufferedamountlow' listener will resume the pump.
+                return peerState.queue.length === 0;
+            };
+
+            const allQueuesDrained = () => {
+                for (const [, peerState] of peersMap) {
+                    if (peerState.status === 'sending' && peerState.queue && peerState.queue.length > 0) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
             const sendFileEndFooter = () => {
+                if (footerSent) return;
+                footerSent = true;
                 logger.info(`Finished streaming all chunks for ${transferId}. Sending file-end.`);
                 peersMap.forEach((peerState, peerId) => {
                     if (peerState.status !== 'sending') return;
@@ -1676,140 +1915,107 @@ class VeloApp {
                 }, ackTimeout);
             };
 
-            const dispatchChunk = (sliceBuffer) => {
-                const framedChunk = packChunk(transferId, chunkIndex, sliceBuffer);
-
-                peersMap.forEach((peerState, peerId) => {
-                    if (peerState.status !== 'sending') return;
-
-                    const connObj = this.connections.get(peerId);
-                    if (!connObj || !connObj.conn) {
-                        peerState.status = 'failed';
-                        peerState.error = 'Peer connection lost';
-                        return;
-                    }
-
-                    try {
-                        connObj.conn.send(framedChunk);
-                        peerState.transferred += sliceBuffer.byteLength;
-                    } catch (err) {
-                        logger.error(`Error sending chunk ${chunkIndex} to ${peerId}:`, err);
-                        peerState.status = 'failed';
-                        peerState.error = err.message;
-                    }
-                });
-
-                offset += sliceBuffer.byteLength;
-                chunkIndex++;
-                this.totalBytesTransferred += sliceBuffer.byteLength;
-
-                const progress = file.size > 0 ? Math.min(1, offset / file.size) : 1;
-                const nowTime = Date.now();
-                if (nowTime - transferRecord.lastUiUpdate > 150 || progress >= 1) {
-                    transferRecord.lastUiUpdate = nowTime;
-                    this.updateTransferUI(transferId, progress);
-                }
-            };
-
-            const sendNextChunk = () => {
-                if (transferRecord.isCancelled) {
-                    logger.info(`Transfer ${transferId} was cancelled by sender.`);
-                    return;
-                }
-
-                // One FileReader read at a time; kicks from handleFileAccept or
-                // poll timers must not double-queue reads.
-                if (readInFlight) return;
-
-                let activePeers = acceptedPeers();
-                if (activePeers.length === 0) {
-                    // Nothing accepted yet: park while consent is pending; the
-                    // consent timeout or handleFileAccept will resume us.
-                    if (hasAwaitingPeers()) {
-                        if (!pollScheduled) {
-                            pollScheduled = true;
-                            setTimeout(() => { pollScheduled = false; sendNextChunk(); }, 250);
-                        }
-                        return;
-                    }
-                    logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
-                    this.finalizeSendTransfer(transferId, false, 'All peers failed');
-                    return;
-                }
-
-                // Backpressure check on data channels
-                let maxBuffered = 0;
-                for (const [peerId, peerState] of activePeers) {
-                    const connObj = this.connections.get(peerId);
-                    if (!connObj || !connObj.conn || !connObj.conn.dataChannel || connObj.conn.dataChannel.readyState !== 'open') {
-                        peerState.status = 'failed';
-                        peerState.error = 'Data channel closed';
-                        continue;
-                    }
-                    maxBuffered = Math.max(maxBuffered, connObj.conn.dataChannel.bufferedAmount || 0);
-                }
-
-                // Re-check active peers after dead channel pruning
-                activePeers = acceptedPeers();
-                if (activePeers.length === 0) {
-                    if (hasAwaitingPeers()) {
-                        sendNextChunk();
-                    } else {
-                        logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
-                        this.finalizeSendTransfer(transferId, false, 'All peers failed');
-                    }
-                    return;
-                }
-
-                if (maxBuffered > ProtocolConstants.BACKPRESSURE_HIGH_WATERMARK) {
-                    // Buffer full, pause and check back
-                    setTimeout(sendNextChunk, 15);
-                    return;
-                }
-
-                // Read slice
-                const slice = file.slice(offset, offset + chunkSize);
-                readInFlight = true;
-                reader.readAsArrayBuffer(slice);
-            };
-
-            reader.onload = (e) => {
-                readInFlight = false;
-                if (transferRecord.isCancelled) return;
-
-                dispatchChunk(e.target.result);
-
-                if (offset < file.size) {
-                    // Continue streaming next chunk
-                    setTimeout(sendNextChunk, 0);
-                } else {
+            /** Footer is sent once EOF is reached and every queue is drained. */
+            const maybeSendFooter = () => {
+                if (eof && !footerSent && allQueuesDrained()) {
                     sendFileEndFooter();
                 }
             };
 
-            reader.onerror = (e) => {
-                readInFlight = false;
-                logger.error(`FileReader error on file ${safeName}:`, e);
-                this.showToast(`Error reading file "${safeName}"`, 'error');
-                this.finalizeSendTransfer(transferId, false, 'File reading error');
-            };
+            const readLoop = async () => {
+                if (readLoopRunning || transferRecord.isCancelled) return;
+                readLoopRunning = true;
 
-            reader.onabort = () => {
-                readInFlight = false;
-                logger.warn(`FileReader aborted for file ${safeName}`);
-                this.finalizeSendTransfer(transferId, false, 'File transfer cancelled');
+                try {
+                    while (!eof && !transferRecord.isCancelled) {
+                        // No accepted peers yet: park while consent is pending;
+                        // handleFileAccept or the consent timeout resumes us.
+                        let activePeers = acceptedPeers();
+                        if (activePeers.length === 0) {
+                            if (hasAwaitingPeers()) {
+                                await new Promise(r => setTimeout(r, 250));
+                                continue;
+                            }
+                            logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
+                            this.finalizeSendTransfer(transferId, false, 'All peers failed');
+                            return;
+                        }
+
+                        // Per-peer flow control: only read the next slice while
+                        // EVERY active peer has window space. Chunk buffers are
+                        // shared references, so read-ahead costs one copy per
+                        // chunk no matter how many peers lag.
+                        const fullQueues = activePeers.filter(([, p]) => (p.queue ? p.queue.length : 0) >= SEND_WINDOW);
+                        if (fullQueues.length > 0) {
+                            // Kick pumps in case events were missed
+                            fullQueues.forEach(([peerId, p]) => pumpPeer(peerId, p));
+                            await new Promise(r => setTimeout(r, 10));
+                            continue;
+                        }
+
+                        // Prefetch: read the next slice while the DataChannel
+                        // drains in the background.
+                        const payload = await file.slice(offset, offset + chunkSize).arrayBuffer();
+                        if (transferRecord.isCancelled) return;
+
+                        const framed = packChunk(transferId, chunkIndex, payload);
+                        const item = { framed, size: payload.byteLength };
+
+                        // Re-check acceptance: a peer may have failed while we
+                        // awaited the read.
+                        let dispatched = false;
+                        peersMap.forEach((peerState, peerId) => {
+                            if (peerState.status !== 'sending') return;
+                            if (!peerState.queue) peerState.queue = [];
+                            peerState.queue.push(item);
+                            dispatched = true;
+                            pumpPeer(peerId, peerState);
+                        });
+
+                        if (dispatched) {
+                            offset += payload.byteLength;
+                            chunkIndex++;
+                            this.totalBytesTransferred += payload.byteLength;
+
+                            const progress = file.size > 0 ? Math.min(1, offset / file.size) : 1;
+                            const nowTime = Date.now();
+                            if (nowTime - transferRecord.lastUiUpdate > 150 || progress >= 1) {
+                                transferRecord.lastUiUpdate = nowTime;
+                                this.updateTransferUI(transferId, progress);
+                            }
+                        }
+
+                        if (offset >= file.size) {
+                            eof = true;
+                        }
+                    }
+
+                    maybeSendFooter();
+                } catch (err) {
+                    logger.error(`Read/send loop failed for ${transferId}:`, err);
+                    this.finalizeSendTransfer(transferId, false, err.message || 'Read error');
+                } finally {
+                    readLoopRunning = false;
+                }
             };
 
             if (file.size === 0) {
-                // Zero-byte file: still emit the single empty chunk the
-                // protocol expects (totalChunks === 1), then the footer.
-                dispatchChunk(new ArrayBuffer(0));
-                sendFileEndFooter();
-                return;
+                // Zero-byte file: emit the single empty chunk the protocol
+                // expects (totalChunks === 1), then the footer.
+                const emptyItem = { framed: packChunk(transferId, 0, new ArrayBuffer(0)), size: 0 };
+                peersMap.forEach((peerState, peerId) => {
+                    if (peerState.status !== 'sending') return;
+                    if (!peerState.queue) peerState.queue = [];
+                    peerState.queue.push(emptyItem);
+                    pumpPeer(peerId, peerState);
+                });
+                eof = true;
+                // Footer must wait until queues drain; pump then check
+                setTimeout(maybeSendFooter, 0);
+            } else {
+                // Kick off streaming
+                readLoop();
             }
-
-            // Kick off streaming
-            sendNextChunk();
         } catch (err) {
             logger.error('Unexpected error in sendFile:', err);
             this.showToast(`Transfer failed unexpectedly: ${err.message}`, 'error');
@@ -1895,7 +2101,7 @@ class VeloApp {
             return;
         }
 
-        // Receiver role: the SENDER reported a failure — clean up our receive
+        // Receiver role: the SENDER reported a failure - clean up our receive
         // record, free its chunks and concurrency slot.
         const compositeKey = `${peerId}:${transferId}`;
         const receive = this.activeReceives.get(compositeKey);
@@ -1921,7 +2127,7 @@ class VeloApp {
             return;
         }
 
-        // Receiver role: the SENDER cancelled — remove the matching
+        // Receiver role: the SENDER cancelled - remove the matching
         // activeReceives entry (peerId:transferId), free its chunks, update
         // the UI, and free its concurrency slot.
         const compositeKey = `${peerId}:${transferId}`;
@@ -1968,6 +2174,29 @@ class VeloApp {
         });
     }
 
+    /**
+     * Real adaptive chunk sizing: measures achieved throughput of a finished
+     * transfer and adjusts the chunk size for the NEXT transfer within
+     * [MIN_CHUNK_SIZE, MAX_CHUNK_SIZE]. Applied between transfers only, so
+     * totalChunks/chunkSize stay consistent within one transfer.
+     */
+    adaptChunkSize(transfer) {
+        const elapsedSec = (Date.now() - transfer.startTime) / 1000;
+        // Need enough signal: at least 2s and a few MB actually moved
+        if (!Number.isFinite(elapsedSec) || elapsedSec < 2 || transfer.size < 4 * 1024 * 1024) return;
+
+        const throughput = transfer.size / elapsedSec; // bytes/sec
+        const before = this.currentChunkSize;
+        if (throughput > 20 * 1024 * 1024) {
+            this.currentChunkSize = Math.min(ProtocolConstants.MAX_CHUNK_SIZE, this.currentChunkSize * 2);
+        } else if (throughput < 2 * 1024 * 1024) {
+            this.currentChunkSize = Math.max(ProtocolConstants.MIN_CHUNK_SIZE, Math.floor(this.currentChunkSize / 2));
+        }
+        if (this.currentChunkSize !== before) {
+            logger.info(`Adaptive chunk size: ${before} -> ${this.currentChunkSize} (throughput ${this.formatSpeed(throughput)})`);
+        }
+    }
+
     finalizeSendTransfer(transferId, success, failureReason = '') {
         const transfer = this.activeSends.get(transferId);
         if (!transfer) return;
@@ -1990,10 +2219,13 @@ class VeloApp {
             });
 
             let toast = `Sent: ${transfer.name}`;
-            if (okPeers.length) toast += ` — delivered to ${okPeers.join(', ')}`;
-            if (failedPeers.length) toast += ` — failed for ${failedPeers.join(', ')}`;
+            if (okPeers.length) toast += ` - delivered to ${okPeers.join(', ')}`;
+            if (failedPeers.length) toast += ` - failed for ${failedPeers.join(', ')}`;
             this.showToast(toast, failedPeers.length ? 'warning' : 'success');
-            if (failedPeers.length === 0) this.playCompletionSound();
+            if (failedPeers.length === 0) {
+                this.playCompletionSound();
+                this.adaptChunkSize(transfer);
+            }
         } else {
             // Tell receivers the send failed so they can clean up
             this.notifyPeersOfSendFailure(transfer, failureReason || 'Transfer failed');
@@ -2091,7 +2323,7 @@ class VeloApp {
         }
 
         const senderName = this.connections.get(peerId)?.username || peerId;
-        logger.info(`file-start from ${peerId}: ${safeName} (${size} bytes, ${totalChunks} chunks) — requesting consent`);
+        logger.info(`file-start from ${peerId}: ${safeName} (${size} bytes, ${totalChunks} chunks) - requesting consent`);
 
         // Consent-gated intake: no chunks are allocated or accepted until the
         // user explicitly accepts.
@@ -2190,6 +2422,11 @@ class VeloApp {
         receive.state = 'receiving';
         receive.chunks = new Array(receive.totalChunks);
         receive.lastProgressAt = Date.now();
+        receive.hasher = new Sha256(); // incremental digest: no whole-file copy
+
+        // Prefer streaming straight to disk (OPFS) so the file never sits in
+        // RAM; fall back to in-memory chunks where unavailable.
+        this.setupReceiveSink(receive);
 
         const conn = this.connections.get(receive.peerId)?.conn;
         if (conn) {
@@ -2199,6 +2436,41 @@ class VeloApp {
         }
 
         this.addTransferToUI(receive.transferId, receive.name, receive.size, 'receive');
+    }
+
+    /**
+     * Opens an OPFS (origin-private filesystem) sink for the transfer when the
+     * browser supports it. Chunk writes are chained to preserve order.
+     */
+    async setupReceiveSink(receive) {
+        try {
+            if (navigator.storage && typeof navigator.storage.getDirectory === 'function') {
+                const root = await navigator.storage.getDirectory();
+                const handle = await root.getFileHandle(`velo-${receive.transferId}.part`, { create: true });
+                const writable = await handle.createWritable();
+                receive.opfsRoot = root;
+                receive.opfsName = `velo-${receive.transferId}.part`;
+                receive.writable = writable;
+                receive.useOpfs = true;
+                receive.chunks = null; // not buffered in RAM in streaming mode
+                receive.writeChain = Promise.resolve();
+                logger.info(`Streaming receive ${receive.transferId} to OPFS`);
+            }
+        } catch (e) {
+            logger.warn('OPFS sink unavailable, falling back to in-memory receive:', e);
+            receive.useOpfs = false;
+            if (!receive.chunks) receive.chunks = new Array(receive.totalChunks);
+        }
+    }
+
+    /** Removes the temporary OPFS part file for a finished/aborted receive. */
+    cleanupOpfsSink(receive) {
+        if (!receive.useOpfs || !receive.opfsRoot || !receive.opfsName) return;
+        try {
+            receive.opfsRoot.removeEntry(receive.opfsName).catch(() => {});
+        } catch (e) {}
+        receive.opfsRoot = null;
+        receive.writable = null;
     }
 
     declineIncomingTransfer(compositeKey, reason = 'Declined by you') {
@@ -2230,6 +2502,7 @@ class VeloApp {
 
         this.activeReceives.delete(compositeKey); // frees the concurrency slot
         receive.chunks = null;                    // free buffered chunk memory
+        this.cleanupOpfsSink(receive);            // remove temp streamed file
 
         if (receive.state !== 'awaiting-consent') {
             this.failTransferUI(receive.transferId, reason || 'Transfer aborted');
@@ -2371,11 +2644,35 @@ class VeloApp {
             return;
         }
 
-        receive.chunks[sequenceNumber] = payload;
+        const isInOrder = sequenceNumber === receive.expectedNextSeq;
+
+        if (receive.useOpfs) {
+            // Streaming mode: ordered reliable data channels deliver chunks in
+            // sequence; a deviation can't be cheaply reassembled from disk.
+            if (!isInOrder) {
+                this.abortReceiveWithProtocolError(receive, 'Out-of-order chunk in streaming mode');
+                return;
+            }
+            if (receive.hasher && payload.byteLength > 0) {
+                receive.hasher.update(payload);
+            }
+            receive.writeChain = receive.writeChain
+                .then(() => receive.writable.write(payload))
+                .catch((err) => {
+                    logger.error(`OPFS write failed for ${receive.transferId}:`, err);
+                    this.cleanupReceive(receive.compositeKey, 'Disk write failed');
+                });
+        } else {
+            receive.chunks[sequenceNumber] = payload;
+            if (isInOrder && receive.hasher && payload.byteLength > 0) {
+                receive.hasher.update(payload); // incremental: no whole-file copy
+            }
+        }
+
         receive.receivedChunks.add(sequenceNumber);
         receive.receivedBytes += payload.byteLength;
         receive.lastProgressAt = Date.now();
-        if (sequenceNumber !== receive.expectedNextSeq) {
+        if (!isInOrder) {
             receive.receivedInOrder = false;
         }
         receive.expectedNextSeq = Math.max(receive.expectedNextSeq, sequenceNumber + 1);
@@ -2451,14 +2748,34 @@ class VeloApp {
             this.failTransferUI(transferId, 'Corrupted transfer: missing chunks');
             this.activeReceives.delete(compositeKey);
             receive.chunks = null;
+            this.cleanupOpfsSink(receive);
             this.showToast(`Transfer of ${receive.name} failed: missing chunks`, 'error');
             return;
         }
 
-        // 2. Reconstruct file Blob
-        const blob = new Blob(receive.chunks);
-        // Release chunk array immediately to free memory
-        receive.chunks = null;
+        // 2. Materialize the file: from the OPFS sink when streaming, else from
+        //    the in-memory chunk array.
+        let blob;
+        if (receive.useOpfs && receive.opfsRoot) {
+            try {
+                await receive.writeChain;
+                if (receive.writable) {
+                    await receive.writable.close();
+                    receive.writable = null;
+                }
+                blob = await receive.opfsRoot.getFileHandle(receive.opfsName).getFile();
+            } catch (err) {
+                logger.error(`Failed to flush OPFS sink for ${transferId}:`, err);
+                this.failTransferUI(transferId, 'Could not finalize streamed file');
+                this.activeReceives.delete(compositeKey);
+                this.cleanupOpfsSink(receive);
+                this.showToast(`Transfer of ${receive.name} failed while writing to disk`, 'error');
+                return;
+            }
+        } else {
+            blob = new Blob(receive.chunks);
+            receive.chunks = null;
+        }
 
         if (blob.size !== receive.size) {
             logger.error(`Byte size mismatch: expected ${receive.size}, reconstructed ${blob.size}`);
@@ -2473,13 +2790,21 @@ class VeloApp {
             }
             this.failTransferUI(transferId, 'Corrupted transfer: byte count mismatch');
             this.activeReceives.delete(compositeKey);
+            this.cleanupOpfsSink(receive);
             this.showToast(`Transfer of ${receive.name} failed: byte count mismatch`, 'error');
             return;
         }
 
-        // 3. Verify SHA-256 Checksum (FAIL-CLOSED: any error or mismatch aborts transfer)
+        // 3. Verify SHA-256 (FAIL-CLOSED). Uses the incremental digest when
+        //    chunks arrived in order (the common case); falls back to hashing
+        //    the assembled Blob otherwise.
         try {
-            const computedHash = await computeSha256(blob);
+            let computedHash;
+            if (receive.receivedInOrder && receive.hasher) {
+                computedHash = receive.hasher.digest();
+            } else {
+                computedHash = await computeSha256(blob);
+            }
             if (computedHash.toLowerCase() !== receive.sha256.toLowerCase()) {
                 logger.error(`SHA-256 mismatch! Expected: ${receive.sha256}, computed: ${computedHash}`);
                 if (conn) {
@@ -2493,6 +2818,7 @@ class VeloApp {
                 }
                 this.failTransferUI(transferId, 'Integrity verification failed (corrupted file)');
                 this.activeReceives.delete(compositeKey);
+                this.cleanupOpfsSink(receive);
                 this.showToast(`Transfer of ${receive.name} failed integrity verification`, 'error');
                 return;
             }
@@ -2510,6 +2836,7 @@ class VeloApp {
             }
             this.failTransferUI(transferId, 'Integrity check error (transfer aborted)');
             this.activeReceives.delete(compositeKey);
+            this.cleanupOpfsSink(receive);
             this.showToast(`Transfer of ${receive.name} failed during integrity check`, 'error');
             return;
         }
@@ -2545,6 +2872,8 @@ class VeloApp {
         this.playCompletionSound();
 
         this.activeReceives.delete(compositeKey);
+        // Remove the temp OPFS file only after the download URL is revoked
+        setTimeout(() => this.cleanupOpfsSink(receive), 35000);
     }
 
     // ==================== CANCELLATION & QUEUE MANAGEMENT ====================
@@ -2835,7 +3164,7 @@ class VeloApp {
 
         testEntry.expectingTestData = false;
         // Receiver-local interval between the control header and the binary
-        // payload — measured on this machine's clock only.
+        // payload - measured on this machine's clock only.
         const localIntervalMs = testEntry.headerAt ? Date.now() - testEntry.headerAt : null;
         const conn = this.connections.get(peerId)?.conn;
         if (conn) {
@@ -2927,7 +3256,7 @@ class VeloApp {
             this.updateTransferStatUI(id, aggregateSpeed, remainingWorst, slowestPeerSpeed !== Infinity ? slowestPeerSpeed : null);
         });
 
-        // 2. Active receives: pass the TRANSFER id — the DOM elements are keyed
+        // 2. Active receives: pass the TRANSFER id - the DOM elements are keyed
         //    by transferId, not the composite map key.
         this.activeReceives.forEach((receive) => {
             const elapsed = (now - (receive.lastSpeedCheck || receive.startTime)) / 1000;
@@ -3009,7 +3338,7 @@ class VeloApp {
         if (!this.peerList) return;
         this.peerList.textContent = ''; // Safe clear
 
-        // 1. "Add Peer" pill — keyboard focusable, inline input instead of prompt()
+        // 1. "Add Peer" pill - keyboard focusable, inline input instead of prompt()
         const addPill = document.createElement('div');
         addPill.className = 'peer-pill';
         addPill.style.cursor = 'pointer';
@@ -3496,7 +3825,7 @@ class VeloApp {
 
         const sub = document.createElement('p');
         sub.style.cssText = 'color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.9rem;';
-        sub.textContent = 'Text is streamed peer-to-peer over WebRTC—never saved on any server. Only peers connected right now receive it.';
+        sub.textContent = 'Text is streamed peer-to-peer over WebRTC-never saved on any server. Only peers connected right now receive it.';
         card.appendChild(sub);
 
         const textarea = document.createElement('textarea');
@@ -3819,7 +4148,7 @@ class VeloApp {
             // sees that the Peer ID will change before anything happens.
             if (!saveArmed) {
                 saveArmed = true;
-                saveBtn.textContent = 'Confirm — my Peer ID will change';
+                saveBtn.textContent = 'Confirm - my Peer ID will change';
                 setTimeout(() => {
                     saveArmed = false;
                     saveBtn.textContent = 'Save & Apply';
@@ -4114,9 +4443,10 @@ if (typeof module !== 'undefined' && module.exports) {
         sanitizeUsername,
         sanitizeText,
         validateFileStartMetadata,
-        computeAdaptiveAckTimeout,
-        UUID_REGEX,
-        SHA256_REGEX,
-        VeloApp
+    computeAdaptiveAckTimeout,
+    UUID_REGEX,
+    SHA256_REGEX,
+    Sha256,
+    VeloApp
     };
 }
