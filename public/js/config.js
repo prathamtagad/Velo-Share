@@ -143,7 +143,7 @@
     }
 
     /**
-     * Get the active ICE configuration.
+     * Get the active ICE configuration (synchronous).
      * Real merge: DEFAULT STUN + DEPLOYMENT TURN + USER TURN CONFIG
      */
     function getIceConfig() {
@@ -183,6 +183,44 @@
     }
 
     /**
+     * Async variant: resolves ephemeral TURN credentials from the deployment's
+     * `turnTokenEndpoint` (the single documented key in velo-config.js) and
+     * merges them with static deployment config, user config, and defaults.
+     * @returns {Promise<{iceServers: Array<RTCIceServer>, iceCandidatePoolSize: number, iceTransportPolicy: string}>}
+     */
+    async function getIceConfigAsync() {
+        let ephemeralServers = [];
+        const endpoint = (typeof window !== 'undefined' && window.VELO_CONFIG && window.VELO_CONFIG.turnTokenEndpoint) || null;
+        if (endpoint) {
+            ephemeralServers = await fetchEphemeralTurnCredentials(endpoint);
+        }
+
+        // Reuse the sync path for static deployment + user + default servers,
+        // then merge ephemeral servers in with the highest precedence.
+        const base = getIceConfig();
+        const iceServers = mergeIceServers([], base.iceServers, ephemeralServers);
+
+        return {
+            iceServers,
+            iceCandidatePoolSize: 10,
+            iceTransportPolicy: 'all'
+        };
+    }
+
+    /**
+     * Self-hosted PeerJS signaling options from the deployment config.
+     * Returns undefined so callers fall back to the PeerJS cloud default.
+     */
+    function getPeerServerOptions() {
+        if (typeof window === 'undefined' || !window.VELO_CONFIG || typeof window.VELO_CONFIG.peerServer !== 'object') {
+            return undefined;
+        }
+        const { host, port, path, secure, key } = window.VELO_CONFIG.peerServer;
+        if (!host) return undefined;
+        return { host, port, path, secure: secure !== false, key };
+    }
+
+    /**
      * Save custom ICE servers to localStorage.
      * @param {Array<RTCIceServer>} servers 
      */
@@ -206,6 +244,8 @@
 
     const configExport = {
         getIceConfig,
+        getIceConfigAsync,
+        getPeerServerOptions,
         setCustomIceServers,
         mergeIceServers,
         validateIceServer,

@@ -841,9 +841,11 @@ class VeloApp {
 
     /**
      * Initializes the PeerJS instance with robust ICE configuration.
-     * Uses generation/epoch tracking so callbacks from destroyed instances are ignored.
+     * Async: ephemeral TURN credentials (deployment turnTokenEndpoint) are
+     * fetched before connecting. Uses generation/epoch tracking so callbacks
+     * from destroyed instances are ignored.
      */
-    initPeer(targetPeerIdToConnect = null) {
+    async initPeer(targetPeerIdToConnect = null) {
         if (this.peer && !this.peer.destroyed) {
             this.peer.destroy();
             this.peer = null;
@@ -852,23 +854,49 @@ class VeloApp {
         const gen = ++this.peerGeneration;
 
         const myId = generatePeerId();
-        const iceConfig = window.VeloConfig ? window.VeloConfig.getIceConfig() : {
+        const fallbackIce = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' }
             ]
         };
+        let iceConfig = fallbackIce;
+        try {
+            if (window.VeloConfig && typeof window.VeloConfig.getIceConfigAsync === 'function') {
+                iceConfig = await window.VeloConfig.getIceConfigAsync();
+            } else if (window.VeloConfig) {
+                iceConfig = window.VeloConfig.getIceConfig();
+            }
+        } catch (err) {
+            logger.warn('ICE config resolution failed, using default STUN:', err);
+        }
+        if (this.peerGeneration !== gen) {
+            logger.log('initPeer superseded while awaiting ICE config; aborting generation', gen);
+            return;
+        }
 
-        logger.info('Initializing PeerJS with ID:', myId, 'ICE servers count:', iceConfig.iceServers.length, 'generation:', gen);
+        const peerOptions = {
+            debug: logger.debugEnabled ? 2 : 1,
+            config: iceConfig
+        };
+        // Self-hosted signaling server, if the deployment defines one
+        const peerServer = window.VeloConfig && window.VeloConfig.getPeerServerOptions ? window.VeloConfig.getPeerServerOptions() : undefined;
+        if (peerServer) {
+            peerOptions.host = peerServer.host;
+            peerOptions.port = peerServer.port;
+            peerOptions.path = peerServer.path;
+            peerOptions.secure = peerServer.secure;
+            peerOptions.key = peerServer.key;
+        }
+
+        logger.info('Initializing PeerJS with ID:', myId, 'ICE servers count:', iceConfig.iceServers.length, 'generation:', gen,
+            peerServer ? `(self-hosted signaling: ${peerServer.host})` : '(PeerJS cloud signaling)');
 
         this.signalingState = 'connecting';
         this.updateStatus('connecting');
 
         try {
-            this.peer = new Peer(myId, {
-                debug: logger.debugEnabled ? 2 : 1,
-                config: iceConfig
-            });
+            this.peer = new Peer(myId, peerOptions);
         } catch (err) {
             logger.error('Failed to construct PeerJS instance:', err);
             this.showToast('Failed to initialize P2P engine. Check browser settings.', 'error');
