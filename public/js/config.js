@@ -160,18 +160,17 @@
         }
 
         // 2. Check for user-defined localStorage override
-        if (typeof localStorage !== 'undefined') {
-            try {
-                const saved = localStorage.getItem('velo_custom_ice_servers');
-                if (saved) {
-                    const parsed = JSON.parse(saved);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                        userServers = parsed;
-                    }
+        try {
+            const saved = localStorage.getItem('velo_custom_ice_servers');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    userServers = parsed;
                 }
-            } catch (e) {
-                console.warn('[VeloConfig] Failed to parse custom ICE servers from localStorage:', e);
             }
+        } catch (e) {
+            // localStorage can throw (privacy mode, quota, disabled); degrade to defaults
+            console.warn('[VeloConfig] Failed to read custom ICE servers from localStorage:', e);
         }
 
         const iceServers = mergeIceServers(DEFAULT_STUN_SERVERS, deploymentServers, userServers);
@@ -188,17 +187,20 @@
      * @param {Array<RTCIceServer>} servers 
      */
     function setCustomIceServers(servers) {
-        if (typeof localStorage === 'undefined') return;
-        if (!servers || !Array.isArray(servers) || servers.length === 0) {
-            localStorage.removeItem('velo_custom_ice_servers');
-        } else {
-            // Validate before saving
-            const validated = servers.map(validateIceServer).filter(Boolean);
-            if (validated.length === 0) {
+        try {
+            if (!servers || !Array.isArray(servers) || servers.length === 0) {
                 localStorage.removeItem('velo_custom_ice_servers');
             } else {
-                localStorage.setItem('velo_custom_ice_servers', JSON.stringify(validated));
+                // Validate before saving
+                const validated = servers.map(validateIceServer).filter(Boolean);
+                if (validated.length === 0) {
+                    localStorage.removeItem('velo_custom_ice_servers');
+                } else {
+                    localStorage.setItem('velo_custom_ice_servers', JSON.stringify(validated));
+                }
             }
+        } catch (e) {
+            console.warn('[VeloConfig] Failed to persist custom ICE servers:', e);
         }
     }
 

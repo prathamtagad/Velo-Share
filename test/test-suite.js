@@ -219,19 +219,24 @@ test('generateUuid produces 100 unique valid v4 UUIDs', () => {
     assert.strictEqual(ids.size, 100);
 });
 
-test('generatePeerId produces valid VELO-XXXXXX format', () => {
+test('generatePeerId produces valid VELO-XXXXXXXXXX format (CSPRNG, 50 bits)', () => {
     for (let i = 0; i < 50; i++) {
         const pid = generatePeerId();
         assert.ok(pid.startsWith('VELO-'), `ID must start with VELO-: ${pid}`);
-        assert.strictEqual(pid.length, 11);
+        assert.strictEqual(pid.length, 15); // 'VELO-' + 10 chars
     }
 });
 
 // 7. Security Sanitization & XSS Hardening
 test('sanitizeFilename neutralizes directory traversal and XSS characters', () => {
-    assert.strictEqual(sanitizeFilename('../../../secret.txt'), '_________secret.txt');
+    // Traversal is neutralized: path separators become underscores and leading
+    // dots are stripped; ordinary '..' inside the name is left intact.
+    assert.strictEqual(sanitizeFilename('../../../secret.txt'), '_.._.._secret.txt');
     assert.strictEqual(sanitizeFilename('<script>alert(1)</script>.png'), '_script_alert(1)__script_.png');
     assert.strictEqual(sanitizeFilename('normal-photo.jpg'), 'normal-photo.jpg');
+    assert.strictEqual(sanitizeFilename('file\x00name.txt'), 'filename.txt');
+    assert.strictEqual(sanitizeFilename('trailing-dots... '), 'trailing-dots');
+    assert.strictEqual(sanitizeFilename('CON'), '_CON');
     assert.strictEqual(sanitizeFilename(''), 'unnamed_file');
     assert.strictEqual(sanitizeFilename(null), 'unknown_file');
 });

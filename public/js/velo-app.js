@@ -26,10 +26,12 @@
 const ProtocolConstants = {
     MAGIC_0: 0x56, // 'V'
     MAGIC_1: 0x4C, // 'L'
-    VERSION: 1,
+    // v2: consent handshake (file-accept), mandatory sha256, v4-strict UUIDs,
+    // exact chunk-length bounds. v1 peers cannot interoperate with v2 peers.
+    VERSION: 2,
     UUID_LENGTH: 36,
     HEADER_SIZE: 44, // 2 (magic) + 1 (ver) + 1 (uuidLen) + 36 (uuid) + 4 (seq Uint32)
-    MAX_FILE_SIZE: 2 * 1024 * 1024 * 1024, // 2GB practical browser memory limit
+    MAX_FILE_SIZE: 2 * 1024 * 1024 * 1024, // 2GB protocol ceiling (see README for per-mode limits)
     DEFAULT_CHUNK_SIZE: 512 * 1024, // 512KB
     MIN_CHUNK_SIZE: 128 * 1024, // 128KB
     MAX_CHUNK_SIZE: 1024 * 1024, // 1MB
@@ -39,8 +41,21 @@ const ProtocolConstants = {
     SPEED_TEST_TIMEOUT_MS: 10000,
     MAX_RECONNECT_ATTEMPTS: 5,
     MAX_TEXT_SHARE_CHARS: 50000,
-    MAX_CONCURRENT_RECEIVES: 3,
+    MAX_CONCURRENT_RECEIVES: 3,        // per peer
+    MAX_ACTIVE_RECEIVES_TOTAL: 8,      // global across all peers
+    MAX_AGGREGATE_RECEIVE_BUFFER: 512 * 1024 * 1024, // total bytes buffered across receives
+    MAX_CONNECTIONS: 16,               // concurrent peer connections
     MAX_QUEUED_FILES: 50,
+    RECEIVE_IDLE_TIMEOUT_MS: 30000,    // no chunk progress for 30s -> stall cleanup
+    CONSENT_TIMEOUT_MS: 60000,         // unanswered incoming-file consent -> auto-decline
+    FILE_ACCEPT_TIMEOUT_MS: 60000,     // sender gives up on receivers that never accept
+    TEXT_SHARE_LINK_TTL_MS: 10 * 60000, // one-time text share link validity
+    CONTROL_MSG_LIMIT: 150,            // JSON control messages per rate window per peer
+    CHUNK_MSG_LIMIT: 4000,             // binary chunks per rate window per peer
+    PING_MSG_LIMIT: 12,                // speed-test pings per rate window per peer
+    RATE_WINDOW_MS: 5000,
+    RATE_LIMIT_STRIKES: 3,             // consecutive flooded windows -> disconnect peer
+    MAX_INBOUND_PER_MINUTE: 10,        // inbound connection attempts per minute
     ACK_TIMEOUT_MIN_MS: 30000,     // 30 seconds minimum
     ACK_TIMEOUT_MAX_MS: 300000,    // 5 minutes maximum
     ACK_TIMEOUT_THROUGHPUT_ESTIMATE: 15 * 1024 * 1024  // 15 MB/s assumed baseline
@@ -152,44 +167,75 @@ async function computeSha256(data) {
 
 // ==================== UNIQUE ID GENERATOR ====================
 
+/**
+ * Cryptographically secure random integers in [0, max).
+ * Used everywhere identifiers are generated; Math.random must never be used.
+ */
+function randomInt(max) {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        // Rejection sampling to avoid modulo bias
+        const limit = Math.floor(0xFFFFFFFF / max) * max;
+        const buf = new Uint32Array(1);
+        do {
+            crypto.getRandomValues(buf);
+        } while (buf[0] >= limit);
+        return buf[0] % max;
+    }
+    return Math.floor(Math.random() * max); // Last-resort fallback (non-CSPRNG)
+}
+
 function generateUuid() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
     }
-    // RFC4122 v4 compliant fallback
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+    // RFC4122 v4 compliant fallback using a CSPRNG
+    const hex = '0123456789abcdef';
+    let out = '';
+    for (let i = 0; i < 36; i++) {
+        if (i === 8 || i === 13 || i === 18 || i === 23) {
+            out += '-';
+        } else if (i === 14) {
+            out += '4';
+        } else if (i === 19) {
+            out += hex[(randomInt(16) & 0x3) | 0x8];
+        } else {
+            out += hex[randomInt(16)];
+        }
+    }
+    return out;
 }
 
+// 32-char unambiguous alphabet; ~10 chars gives ~50 bits of entropy.
+const PEER_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PEER_ID_RANDOM_CHARS = 10;
+
 function generatePeerId() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let id = 'VELO-';
-    for (let i = 0; i < 6; i++) {
-        id += chars.charAt(Math.floor(Math.random() * chars.length));
+    for (let i = 0; i < PEER_ID_RANDOM_CHARS; i++) {
+        id += PEER_ID_ALPHABET.charAt(randomInt(PEER_ID_ALPHABET.length));
     }
     return id;
 }
 
 // ==================== METADATA VALIDATION ====================
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// RFC 4122 v4: version nibble must be '4', variant nibble must be 8/9/a/b
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_REGEX = /^[0-9a-f]{64}$/;
 
 /**
  * Validates incoming file-start metadata from a remote peer.
  * Returns { valid: true, sanitized: {...} } or { valid: false, error: '...', reason: '...' }.
+ * All numeric fields must be real JS numbers (no string coercion) and sha256 is mandatory.
  */
 function validateFileStartMetadata(data) {
     if (!data || typeof data !== 'object') {
         return { valid: false, error: 'Missing metadata object', reason: 'Missing metadata object' };
     }
 
-    // transferId: standard v4 UUID
+    // transferId: standard v4 UUID (version + variant enforced)
     if (typeof data.transferId !== 'string' || !UUID_REGEX.test(data.transferId)) {
-        const msg = 'Invalid or missing transferId (must be UUID)';
+        const msg = 'Invalid or missing transferId (must be UUID v4)';
         return { valid: false, error: msg, reason: msg };
     }
 
@@ -199,36 +245,39 @@ function validateFileStartMetadata(data) {
         return { valid: false, error: msg, reason: msg };
     }
 
-    // size: finite, non-negative safe integer, bounded
-    const size = Number(data.size);
-    if (!Number.isFinite(size) || size < 0 || size > ProtocolConstants.MAX_FILE_SIZE || !Number.isSafeInteger(size)) {
+    // size: must BE a number (no coercion), finite, non-negative safe integer, bounded
+    const size = data.size;
+    if (typeof size !== 'number' || !Number.isFinite(size) || size < 0 ||
+        size > ProtocolConstants.MAX_FILE_SIZE || !Number.isSafeInteger(size)) {
         const msg = `Invalid file size: ${data.size}`;
         return { valid: false, error: msg, reason: msg };
     }
 
-    // chunkSize: finite, positive safe integer, within protocol bounds
-    const chunkSize = Number(data.chunkSize);
-    if (!Number.isFinite(chunkSize) || chunkSize < ProtocolConstants.MIN_CHUNK_SIZE ||
+    // chunkSize: must BE a number, finite, positive safe integer, within protocol bounds
+    const chunkSize = data.chunkSize;
+    if (typeof chunkSize !== 'number' || !Number.isFinite(chunkSize) ||
+        chunkSize < ProtocolConstants.MIN_CHUNK_SIZE ||
         chunkSize > ProtocolConstants.MAX_CHUNK_SIZE || !Number.isSafeInteger(chunkSize)) {
         const msg = `Invalid chunkSize: ${data.chunkSize}`;
         return { valid: false, error: msg, reason: msg };
     }
 
-    // totalChunks: finite, positive safe integer, must match Math.ceil(size / chunkSize)
-    const totalChunks = Number(data.totalChunks);
+    // totalChunks: must BE a number, must match Math.ceil(size / chunkSize)
+    const totalChunks = data.totalChunks;
     const expectedChunks = size === 0 ? 1 : Math.ceil(size / chunkSize);
-    if (!Number.isFinite(totalChunks) || !Number.isSafeInteger(totalChunks) ||
+    if (typeof totalChunks !== 'number' || !Number.isSafeInteger(totalChunks) ||
         totalChunks < 1 || totalChunks !== expectedChunks) {
         const msg = `totalChunks mismatch: got ${totalChunks}, expected ${expectedChunks}`;
         return { valid: false, error: msg, reason: msg };
     }
 
-    // sha256: exact 64-character lowercase hex string
-    const sha256 = typeof data.sha256 === 'string' ? data.sha256.toLowerCase() : '';
-    if (sha256 && !SHA256_REGEX.test(sha256)) {
-        const msg = `Invalid SHA-256 hash format: ${data.sha256}`;
+    // sha256: MANDATORY — exact 64-character lowercase hex string.
+    // A transfer without a verifiable digest is rejected outright (fail closed).
+    if (typeof data.sha256 !== 'string' || !SHA256_REGEX.test(data.sha256.toLowerCase())) {
+        const msg = 'Missing or malformed SHA-256 digest (mandatory for all transfers)';
         return { valid: false, error: msg, reason: msg };
     }
+    const sha256 = data.sha256.toLowerCase();
 
     return {
         valid: true,
@@ -261,14 +310,53 @@ function computeAdaptiveAckTimeout(fileSize) {
 
 // ==================== SANITIZATION & DOM HELPERS ====================
 
+const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/;
+const MAX_FILENAME_LENGTH = 200;
+
+/**
+ * Produces a safe download filename:
+ * - strips control characters (0x00-0x1F, 0x7F)
+ * - replaces path separators and Windows-illegal characters
+ * - strips leading dots (traversal / hidden files) and trailing dots/spaces (Windows)
+ * - guards Windows reserved device names
+ * - ordinary ".." inside a name is preserved (harmless once separators are gone)
+ * - truncates long names while preserving the extension
+ */
 function sanitizeFilename(filename) {
     if (typeof filename !== 'string') return 'unknown_file';
-    // Neutralize path traversal dots, control characters, and illegal symbols
-    return filename
-        .replace(/\.\./g, '__')
-        .replace(/[/\\?%*:|"<>]/g, '_')
+
+    let name = filename
+        .replace(/[\x00-\x1F\x7F]/g, '')
+        .replace(/[/\\<>:"|?*]/g, '_')
+        .trim();
+
+    name = name.replace(/^\.+/, '').replace(/[. ]+$/, '') || 'unnamed_file';
+
+    if (WINDOWS_RESERVED_NAMES.test(name.split('.')[0].toUpperCase())) {
+        name = '_' + name;
+    }
+
+    if (name.length > MAX_FILENAME_LENGTH) {
+        const dot = name.lastIndexOf('.');
+        const ext = dot > 0 ? name.slice(dot) : '';
+        name = name.slice(0, MAX_FILENAME_LENGTH - ext.length) + ext;
+    }
+
+    return name;
+}
+
+/**
+ * Unicode-aware username sanitizer. Keeps letters/numbers from any script
+ * (e.g. Hindi, Japanese), whitespace, dashes and underscores; strips control
+ * characters and everything else. Non-string input never throws.
+ */
+function sanitizeUsername(raw) {
+    if (typeof raw !== 'string') return 'Peer';
+    return raw
+        .replace(/[\x00-\x1F\x7F]/g, '')
+        .replace(/[^\p{L}\p{N}\s\-_]/gu, '')
         .trim()
-        .slice(0, 255) || 'unnamed_file';
+        .slice(0, 32) || 'Peer';
 }
 
 function sanitizeText(text) {
@@ -360,13 +448,29 @@ class VeloApp {
         this.peakSpeed = 0;
         this.speedInterval = null;
 
+        // Housekeeping sweep (receive idle timeout + consent expiry)
+        this.sweepInterval = null;
+
+        // Consent / abuse controls
+        // compositeKey -> { peerId, transferId, meta, requestedAt }
+        this.pendingConsents = new Map();
+        this.blockedPeers = new Set(); // persisted (best-effort) in localStorage
+        // peerId -> { windowStart, controlCount, chunkCount, pingCount, strikes }
+        this.rateLimits = new Map();
+        this.inboundAttemptTimestamps = []; // inbound connection rate limiting
+
         // Text Sharing
-        this.activeTextShare = null; // { token, text, deliveredToPeers: Set<peerId> }
+        // Direct sends are fire-and-forget to the current target set — never
+        // retained for future peers.
+        // activeTextLink: one-time token for link-based sharing:
+        // { token, text, expiresAt, used }
+        this.activeTextLink = null;
         this.textShareTokenFromUrl = null;
 
         // Audio Context (lazy init)
         this.audioCtx = null;
 
+        this.loadBlockedPeers();
         this.initElements();
         this.bindEvents();
         this.initNewFeatures();
@@ -522,13 +626,6 @@ class VeloApp {
         if (this.landingNetworkBtn) {
             this.landingNetworkBtn.addEventListener('click', () => this.showNetworkSettingsModal());
         }
-
-        // Global Keydown
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.connections.size > 0) {
-                // Confirm before leaving
-            }
-        });
     }
 
     initNewFeatures() {
@@ -765,8 +862,31 @@ class VeloApp {
         const targetId = (peerId || '').trim().toUpperCase();
         if (!targetId) return;
 
+        // Guard: no live signaling channel to dial out with
+        if (!this.peer || this.peer.destroyed) {
+            this.showToast('Not connected to the signaling service. Host or join first.', 'error');
+            return;
+        }
+        if (this.signalingState !== 'open') {
+            this.showToast('Signaling not ready yet. Wait for a connection or re-host.', 'error');
+            return;
+        }
+
         if (targetId === this.myPeerId) {
             this.showToast('Cannot connect to your own Peer ID', 'error');
+            return;
+        }
+
+        // Peer ID is a routing address, NOT authorization: a blocked peer is
+        // refused here and inbound alike.
+        if (this.blockedPeers.has(targetId)) {
+            this.showToast(`${targetId} is blocked. Unblock it before connecting.`, 'error');
+            return;
+        }
+
+        // Connection cap
+        if (this.connections.size + this.pendingConnections.size >= ProtocolConstants.MAX_CONNECTIONS) {
+            this.showToast(`Connection limit reached (${ProtocolConstants.MAX_CONNECTIONS} peers max).`, 'error');
             return;
         }
 
@@ -819,11 +939,47 @@ class VeloApp {
         const remotePeerId = conn.peer;
         logger.info('Evaluating incoming connection from:', remotePeerId);
 
-        // 1. If we already have an active healthy connection to this peer, reject duplicate safely
-        if (this.connections.has(remotePeerId)) {
-            logger.warn(`Duplicate connection received from ${remotePeerId}. Closing redundant instance.`);
-            conn.close();
+        // 0. Blocked peers are closed immediately (Peer ID is not authorization)
+        if (this.blockedPeers.has(remotePeerId)) {
+            logger.warn(`Refusing inbound connection from blocked peer ${remotePeerId}.`);
+            try { conn.close(); } catch (e) {}
             return;
+        }
+
+        // 1. Inbound connection rate limiting (flood protection)
+        const now = Date.now();
+        this.inboundAttemptTimestamps = this.inboundAttemptTimestamps.filter(t => now - t < 60000);
+        if (this.inboundAttemptTimestamps.length >= ProtocolConstants.MAX_INBOUND_PER_MINUTE) {
+            logger.warn(`Inbound connection rate limit hit (${ProtocolConstants.MAX_INBOUND_PER_MINUTE}/min). Dropping ${remotePeerId}.`);
+            try { conn.close(); } catch (e) {}
+            return;
+        }
+        this.inboundAttemptTimestamps.push(now);
+
+        // 2. Concurrent connection cap
+        if (this.connections.size + this.pendingConnections.size >= ProtocolConstants.MAX_CONNECTIONS) {
+            logger.warn(`Connection cap (${ProtocolConstants.MAX_CONNECTIONS}) reached. Dropping inbound from ${remotePeerId}.`);
+            try { conn.close(); } catch (e) {}
+            return;
+        }
+
+        // 3. Existing connection: replace it only if it is stale/dead, otherwise
+        //    reject the duplicate.
+        if (this.connections.has(remotePeerId)) {
+            const existing = this.connections.get(remotePeerId);
+            const stale = !existing.conn ||
+                existing.conn.open === false ||
+                (existing.peerConnection && ['failed', 'closed', 'disconnected'].includes(existing.peerConnection.connectionState));
+
+            if (stale) {
+                logger.warn(`Replacing stale connection for ${remotePeerId} with refreshed inbound connection.`);
+                try { existing.conn.close(); } catch (e) {}
+                this.connections.delete(remotePeerId);
+            } else {
+                logger.warn(`Duplicate connection received from ${remotePeerId}. Closing redundant instance.`);
+                try { conn.close(); } catch (e) {}
+                return;
+            }
         }
 
         // 2. Simultaneous cross-connection collision detection (both peers called connect at the same time)
@@ -866,6 +1022,15 @@ class VeloApp {
         const remotePeerId = conn.peer;
 
         conn.on('open', () => {
+            // A newer connection may have replaced this one while it was
+            // negotiating; don't resurrect state for a superseded conn.
+            const current = this.connections.get(remotePeerId);
+            if (current && current.conn !== conn) {
+                logger.warn(`Ignoring open for superseded connection with ${remotePeerId}.`);
+                try { conn.close(); } catch (e) {}
+                return;
+            }
+
             logger.info(`DataConnection OPEN with: ${remotePeerId} (${isIncoming ? 'inbound' : 'outbound'})`);
 
             // Clear pending tracking
@@ -887,8 +1052,8 @@ class VeloApp {
                 });
             }
 
-            const rawUsername = conn.metadata?.username || 'Peer';
-            const cleanUsername = rawUsername.replace(/[^\w\s-]/g, '').trim().slice(0, 32) || 'Peer';
+            // Type-safe sanitization: a non-string username must not throw here
+            const cleanUsername = sanitizeUsername(conn.metadata?.username ?? 'Peer');
 
             this.connections.set(remotePeerId, {
                 conn,
@@ -910,17 +1075,10 @@ class VeloApp {
                 username: this.myUsername
             });
 
-            // Deliver active text share if receiver requested it
-            const receiverToken = conn.metadata?.textShareToken || null;
-            if (this.activeTextShare) {
-                const { token, text, deliveredToPeers } = this.activeTextShare;
-                if (receiverToken && receiverToken !== token) {
-                    conn.send({ type: 'text-share-miss', token: receiverToken });
-                } else if (!deliveredToPeers.has(remotePeerId)) {
-                    conn.send({ type: 'text-share', token, text });
-                    deliveredToPeers.add(remotePeerId);
-                }
-            }
+            // Deliver one-time link-based text share if this peer presented the
+            // exact, unexpired, unused token.
+            const receiverToken = typeof conn.metadata?.textShareToken === 'string' ? conn.metadata.textShareToken : null;
+            this.deliverTextLinkIfMatched(remotePeerId, receiverToken);
 
             // Process transfer queue in case files were pending
             this.processTransferQueue();
@@ -931,17 +1089,38 @@ class VeloApp {
         });
 
         conn.on('close', () => {
-            logger.info(`DataConnection CLOSED for peer: ${remotePeerId}`);
-            this.handlePeerDisconnect(remotePeerId);
+            // Only tear down if THIS conn is still the registered one; a stale
+            // conn closing must not nuke its replacement.
+            const current = this.connections.get(remotePeerId);
+            const pending = this.pendingConnections.get(remotePeerId);
+            if (current && current.conn === conn) {
+                logger.info(`DataConnection CLOSED for peer: ${remotePeerId}`);
+                this.handlePeerDisconnect(remotePeerId);
+            } else if (pending && pending.conn === conn) {
+                this.cleanupPendingConnection(remotePeerId);
+            }
         });
 
         conn.on('error', (err) => {
             logger.error(`DataConnection ERROR with peer ${remotePeerId}:`, err);
-            this.handlePeerDisconnect(remotePeerId, err);
+            const current = this.connections.get(remotePeerId);
+            const pending = this.pendingConnections.get(remotePeerId);
+            if (current && current.conn === conn) {
+                this.handlePeerDisconnect(remotePeerId, err);
+            } else if (pending && pending.conn === conn) {
+                this.cleanupPendingConnection(remotePeerId);
+            }
         });
     }
 
     handlePeerDisconnect(peerId, error = null) {
+        // Idempotency guard: duplicate close/error events (or stale conns) must
+        // not produce duplicate toasts or re-clean live state.
+        if (!this.connections.has(peerId) && !this.pendingConnections.has(peerId)) {
+            logger.log(`handlePeerDisconnect(${peerId}) called with no registered connection; ignoring.`);
+            return;
+        }
+
         // Clean up pending if any
         this.cleanupPendingConnection(peerId);
 
@@ -951,11 +1130,12 @@ class VeloApp {
         // Remove from active connections
         this.connections.delete(peerId);
         this.selectedPeers.delete(peerId);
+        this.rateLimits.delete(peerId);
 
-        // Remove from delivered text share
-        if (this.activeTextShare?.deliveredToPeers) {
-            this.activeTextShare.deliveredToPeers.delete(peerId);
-        }
+        // Auto-decline any pending file consents from this peer
+        this.pendingConsents.forEach((consent, key) => {
+            if (consent.peerId === peerId) this.declineIncomingTransfer(key, 'Sender disconnected');
+        });
 
         // Clean up any active speed test for this peer
         this.cleanupSpeedTest(peerId, 'Peer disconnected');
@@ -963,7 +1143,7 @@ class VeloApp {
         // Handle active send transfers to this peer
         this.activeSends.forEach((transfer, transferId) => {
             const peerState = transfer.peers.get(peerId);
-            if (peerState && peerState.status === 'sending') {
+            if (peerState && (peerState.status === 'sending' || peerState.status === 'awaiting-accept')) {
                 peerState.status = 'failed';
                 peerState.error = 'Peer disconnected during transfer';
                 logger.warn(`Transfer ${transferId} to peer ${peerId} failed due to disconnect.`);
@@ -977,9 +1157,7 @@ class VeloApp {
         this.activeReceives.forEach((receive, key) => {
             if (receive.peerId === peerId) {
                 logger.warn(`Receive transfer ${receive.transferId} aborted because sender ${peerId} disconnected.`);
-                this.activeReceives.delete(key);
-                this.removeTransferFromUI(receive.transferId);
-                this.showToast(`Transfer of ${receive.name} aborted (sender disconnected)`, 'error');
+                this.cleanupReceive(key, 'Sender disconnected');
             }
         });
 
@@ -1010,6 +1188,14 @@ class VeloApp {
     disconnect() {
         logger.info('User initiated disconnect. Closing all connections.');
         this.stopSpeedTracking();
+        this.stopSweeping();
+
+        // Invalidate any in-flight PeerJS callbacks
+        this.peerGeneration++;
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
 
         this.pendingConnections.forEach(pending => {
             clearTimeout(pending.timeoutId);
@@ -1017,25 +1203,114 @@ class VeloApp {
         });
         this.pendingConnections.clear();
 
+        // Notify peers and settle consent state BEFORE closing their conns
+        this.pendingConsents.forEach((_, key) => this.declineIncomingTransfer(key, 'Disconnecting'));
+        this.activeSends.forEach((transfer) => {
+            if (!transfer.isCancelled) {
+                this.notifyPeersOfSendFailure(transfer, 'Sender disconnected');
+            }
+        });
+
         this.connections.forEach(({ conn }) => {
             try { conn.close(); } catch (e) {}
         });
         this.connections.clear();
+
+        // Reset transfer & queue state
+        this.activeSends.forEach((transfer) => {
+            transfer.reader = null;
+            transfer.file = null;
+        });
+        this.activeSends.clear();
+        this.activeReceives.forEach((_, key) => this.cleanupReceive(key, 'Disconnecting'));
+        this.activeSpeedTests.clear();
+        this.rateLimits.clear();
+        this.queuedFiles.forEach(item => {
+            if (item.status === 'pending' || item.status === 'sending') item.status = 'cancelled';
+            item.file = null;
+        });
+        this.queuedFiles = [];
+        this.isSending = false;
+        this.isPaused = false;
+        this.selectedPeers.clear();
+        this.activeTextLink = null;
 
         if (this.peer) {
             this.peer.destroy();
             this.peer = null;
         }
 
+        this.myPeerId = null;
         this.signalingState = 'closed';
+        if (this.myPeerIdDisplay) this.myPeerIdDisplay.textContent = '...';
+        if (this.transferQueue) this.transferQueue.textContent = '';
+        this.updateQueueUI();
+        this.updatePeerList();
         this.showLandingScreen();
     }
 
     // ==================== PROTOCOL DATA DISPATCHER ====================
 
+    /**
+     * Per-peer sliding-window rate limiter. Returns true if the message is
+     * allowed; false if it must be dropped. Gross flooding accrues strikes and
+     * eventually disconnects the peer.
+     */
+    checkRateLimit(peerId, kind) {
+        const now = Date.now();
+        let budget = this.rateLimits.get(peerId);
+        if (!budget || now - budget.windowStart >= ProtocolConstants.RATE_WINDOW_MS) {
+            budget = budget && budget.strikes > 0
+                ? { windowStart: now, controlCount: 0, chunkCount: 0, pingCount: 0, strikes: budget.strikes - 1 }
+                : { windowStart: now, controlCount: 0, chunkCount: 0, pingCount: 0, strikes: budget ? budget.strikes : 0 };
+            this.rateLimits.set(peerId, budget);
+        }
+
+        if (kind === 'chunk') {
+            budget.chunkCount++;
+            if (budget.chunkCount > ProtocolConstants.CHUNK_MSG_LIMIT) return false;
+            return true;
+        }
+
+        if (kind === 'ping') {
+            budget.pingCount++;
+            budget.controlCount++;
+            if (budget.pingCount > ProtocolConstants.PING_MSG_LIMIT) return false;
+            if (budget.controlCount > ProtocolConstants.CONTROL_MSG_LIMIT) return false;
+            return true;
+        }
+
+        budget.controlCount++;
+        if (budget.controlCount > ProtocolConstants.CONTROL_MSG_LIMIT) return false;
+        return true;
+    }
+
+    enforceRateLimitStrikes(peerId) {
+        const budget = this.rateLimits.get(peerId);
+        if (!budget) return;
+        const flooded = budget.controlCount > ProtocolConstants.CONTROL_MSG_LIMIT ||
+            budget.chunkCount > ProtocolConstants.CHUNK_MSG_LIMIT;
+        if (flooded) {
+            budget.strikes++;
+            if (budget.strikes >= ProtocolConstants.RATE_LIMIT_STRIKES) {
+                logger.warn(`Peer ${peerId} disconnected: persistent protocol message flood.`);
+                this.showToast(`${peerId} disconnected (message flood)`, 'error');
+                const info = this.connections.get(peerId);
+                try { info?.conn?.close(); } catch (e) {}
+                this.handlePeerDisconnect(peerId);
+            }
+        }
+    }
+
     handleData(peerId, data) {
         // 1. Handle Binary Chunk
         if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
+            if (!this.checkRateLimit(peerId, 'chunk')) {
+                logger.warn(`Rate limit: dropping binary payload from ${peerId}`);
+                this.enforceRateLimitStrikes(peerId);
+                return;
+            }
+
             const unpacked = unpackChunk(data);
             if (unpacked) {
                 this.receiveFileChunkFramed(peerId, unpacked);
@@ -1059,6 +1334,13 @@ class VeloApp {
             return;
         }
 
+        const isPing = data.type === 'speed-test-ping';
+        if (!this.checkRateLimit(peerId, isPing ? 'ping' : 'control')) {
+            logger.warn(`Rate limit: dropping '${data.type}' from ${peerId}`);
+            this.enforceRateLimitStrikes(peerId);
+            return;
+        }
+
         switch (data.type) {
             case 'handshake':
                 this.handleHandshake(peerId, data);
@@ -1066,6 +1348,10 @@ class VeloApp {
 
             case 'file-start':
                 this.receiveFileStart(peerId, data);
+                break;
+
+            case 'file-accept':
+                this.handleFileAccept(peerId, data);
                 break;
 
             case 'file-end':
@@ -1119,8 +1405,8 @@ class VeloApp {
 
     handleHandshake(peerId, data) {
         const peerInfo = this.connections.get(peerId);
-        if (peerInfo && typeof data.username === 'string') {
-            peerInfo.username = data.username.replace(/[^\w\s-]/g, '').trim().slice(0, 32) || 'Peer';
+        if (peerInfo) {
+            peerInfo.username = sanitizeUsername(data.username);
             this.updatePeerList();
         }
     }
@@ -1233,11 +1519,15 @@ class VeloApp {
                 return;
             }
 
-            // Initialize Per-Peer Transfer Tracking
+            // Initialize Per-Peer Transfer Tracking.
+            // Peers start in 'awaiting-accept': no chunks flow until the
+            // receiver explicitly consents via file-accept.
             const peersMap = new Map();
             targetConnections.forEach(({ conn }) => {
                 peersMap.set(conn.peer, {
-                    status: 'sending', // 'sending' | 'complete' | 'failed'
+                    status: 'awaiting-accept', // 'awaiting-accept' | 'sending' | 'complete' | 'failed'
+                    accepted: false,
+                    endSent: false,
                     transferred: 0,
                     ackReceived: false,
                     error: null,
@@ -1287,64 +1577,76 @@ class VeloApp {
                 }
             });
 
-            // 3. Sequential Chunk Streaming with Backpressure
+            // Consent deadline: receivers that never answer are failed so the
+            // transfer cannot hang forever before any byte is read.
+            transferRecord.acceptTimeoutId = setTimeout(() => {
+                peersMap.forEach((peerState) => {
+                    if (peerState.status === 'awaiting-accept') {
+                        peerState.status = 'failed';
+                        peerState.error = 'Receiver did not respond to consent request';
+                    }
+                });
+                const anyLive = Array.from(peersMap.values()).some(p => p.status !== 'failed');
+                if (!anyLive) {
+                    this.finalizeSendTransfer(transferId, false, 'No receiver accepted the transfer');
+                } else {
+                    this.checkTransferCompletion(transferId);
+                }
+            }, ProtocolConstants.FILE_ACCEPT_TIMEOUT_MS);
+
+            // 3. Sequential Chunk Streaming with Backpressure.
+            // Chunks are sent ONLY to peers that accepted (status 'sending');
+            // one slow or silent peer never blocks the others.
             const reader = new FileReader();
             transferRecord.reader = reader;
             let chunkIndex = 0;
             let offset = 0;
+            let readInFlight = false;
+            let pollScheduled = false;
 
-            const sendNextChunk = () => {
-                if (transferRecord.isCancelled) {
-                    logger.info(`Transfer ${transferId} was cancelled by sender.`);
-                    return;
-                }
+            const acceptedPeers = () => Array.from(peersMap.entries()).filter(([, p]) => p.status === 'sending');
+            const hasAwaitingPeers = () => Array.from(peersMap.values()).some(p => p.status === 'awaiting-accept');
 
-                // Check if all peers have failed
-                const activePeers = Array.from(peersMap.entries()).filter(([, p]) => p.status === 'sending');
-                if (activePeers.length === 0) {
-                    logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
-                    this.finalizeSendTransfer(transferId, false, 'All peers failed');
-                    return;
-                }
-
-                // Backpressure check on data channels
-                let maxBuffered = 0;
-                for (const [peerId, peerState] of activePeers) {
+            const sendFileEndFooter = () => {
+                logger.info(`Finished streaming all chunks for ${transferId}. Sending file-end.`);
+                peersMap.forEach((peerState, peerId) => {
+                    if (peerState.status !== 'sending') return;
                     const connObj = this.connections.get(peerId);
-                    if (!connObj || !connObj.conn || !connObj.conn.dataChannel || connObj.conn.dataChannel.readyState !== 'open') {
-                        peerState.status = 'failed';
-                        peerState.error = 'Data channel closed';
-                        continue;
+                    if (connObj && connObj.conn) {
+                        try {
+                            connObj.conn.send({
+                                type: 'file-end',
+                                transferId,
+                                totalChunks,
+                                sha256: sha256Hex
+                            });
+                            // file-end sent: only now is a file-complete-ack legal
+                            peerState.endSent = true;
+                        } catch (err) {
+                            peerState.status = 'failed';
+                            peerState.error = err.message;
+                        }
                     }
-                    maxBuffered = Math.max(maxBuffered, connObj.conn.dataChannel.bufferedAmount || 0);
-                }
+                });
 
-                // Re-check active peers after dead channel pruning
-                const stillActive = Array.from(peersMap.entries()).filter(([, p]) => p.status === 'sending');
-                if (stillActive.length === 0) {
-                    logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
-                    this.finalizeSendTransfer(transferId, false, 'All peers failed');
-                    return;
-                }
+                this.setTransferVerifyingUI(transferId);
 
-                if (maxBuffered > ProtocolConstants.BACKPRESSURE_HIGH_WATERMARK) {
-                    // Buffer full, pause and check back
-                    setTimeout(sendNextChunk, 15);
-                    return;
-                }
-
-                // Read slice
-                const slice = file.slice(offset, offset + chunkSize);
-                reader.readAsArrayBuffer(slice);
+                const ackTimeout = computeAdaptiveAckTimeout(file.size);
+                logger.info(`ACK timeout for ${transferId}: ${ackTimeout}ms (file size: ${file.size} bytes)`);
+                transferRecord.ackTimeoutId = setTimeout(() => {
+                    peersMap.forEach((peerState) => {
+                        if (peerState.status === 'sending' && !peerState.ackReceived) {
+                            peerState.status = 'failed';
+                            peerState.error = 'Receiver verification ACK timed out';
+                        }
+                    });
+                    this.checkTransferCompletion(transferId);
+                }, ackTimeout);
             };
 
-            reader.onload = (e) => {
-                if (transferRecord.isCancelled) return;
-
-                const sliceBuffer = e.target.result;
+            const dispatchChunk = (sliceBuffer) => {
                 const framedChunk = packChunk(transferId, chunkIndex, sliceBuffer);
 
-                // Broadcast framed chunk to all active peers
                 peersMap.forEach((peerState, peerId) => {
                     if (peerState.status !== 'sending') return;
 
@@ -1369,70 +1671,110 @@ class VeloApp {
                 chunkIndex++;
                 this.totalBytesTransferred += sliceBuffer.byteLength;
 
-                // Update UI throttled
                 const progress = file.size > 0 ? Math.min(1, offset / file.size) : 1;
                 const nowTime = Date.now();
                 if (nowTime - transferRecord.lastUiUpdate > 150 || progress >= 1) {
                     transferRecord.lastUiUpdate = nowTime;
                     this.updateTransferUI(transferId, progress);
                 }
+            };
+
+            const sendNextChunk = () => {
+                if (transferRecord.isCancelled) {
+                    logger.info(`Transfer ${transferId} was cancelled by sender.`);
+                    return;
+                }
+
+                // One FileReader read at a time; kicks from handleFileAccept or
+                // poll timers must not double-queue reads.
+                if (readInFlight) return;
+
+                let activePeers = acceptedPeers();
+                if (activePeers.length === 0) {
+                    // Nothing accepted yet: park while consent is pending; the
+                    // consent timeout or handleFileAccept will resume us.
+                    if (hasAwaitingPeers()) {
+                        if (!pollScheduled) {
+                            pollScheduled = true;
+                            setTimeout(() => { pollScheduled = false; sendNextChunk(); }, 250);
+                        }
+                        return;
+                    }
+                    logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
+                    this.finalizeSendTransfer(transferId, false, 'All peers failed');
+                    return;
+                }
+
+                // Backpressure check on data channels
+                let maxBuffered = 0;
+                for (const [peerId, peerState] of activePeers) {
+                    const connObj = this.connections.get(peerId);
+                    if (!connObj || !connObj.conn || !connObj.conn.dataChannel || connObj.conn.dataChannel.readyState !== 'open') {
+                        peerState.status = 'failed';
+                        peerState.error = 'Data channel closed';
+                        continue;
+                    }
+                    maxBuffered = Math.max(maxBuffered, connObj.conn.dataChannel.bufferedAmount || 0);
+                }
+
+                // Re-check active peers after dead channel pruning
+                activePeers = acceptedPeers();
+                if (activePeers.length === 0) {
+                    if (hasAwaitingPeers()) {
+                        sendNextChunk();
+                    } else {
+                        logger.warn(`All target peers disconnected or failed for transfer ${transferId}.`);
+                        this.finalizeSendTransfer(transferId, false, 'All peers failed');
+                    }
+                    return;
+                }
+
+                if (maxBuffered > ProtocolConstants.BACKPRESSURE_HIGH_WATERMARK) {
+                    // Buffer full, pause and check back
+                    setTimeout(sendNextChunk, 15);
+                    return;
+                }
+
+                // Read slice
+                const slice = file.slice(offset, offset + chunkSize);
+                readInFlight = true;
+                reader.readAsArrayBuffer(slice);
+            };
+
+            reader.onload = (e) => {
+                readInFlight = false;
+                if (transferRecord.isCancelled) return;
+
+                dispatchChunk(e.target.result);
 
                 if (offset < file.size) {
                     // Continue streaming next chunk
-                    if (typeof setImmediate !== 'undefined') {
-                        setImmediate(sendNextChunk);
-                    } else {
-                        setTimeout(sendNextChunk, 0);
-                    }
+                    setTimeout(sendNextChunk, 0);
                 } else {
-                    // 4. Send file-end footer
-                    logger.info(`Finished streaming all ${totalChunks} chunks for ${transferId}. Sending file-end.`);
-                    peersMap.forEach((peerState, peerId) => {
-                        if (peerState.status !== 'sending') return;
-                        const connObj = this.connections.get(peerId);
-                        if (connObj && connObj.conn) {
-                            try {
-                                connObj.conn.send({
-                                    type: 'file-end',
-                                    transferId,
-                                    totalChunks,
-                                    sha256: sha256Hex
-                                });
-                            } catch (err) {
-                                peerState.status = 'failed';
-                                peerState.error = err.message;
-                            }
-                        }
-                    });
-
-                    // Update UI to verifying state
-                    this.setTransferVerifyingUI(transferId);
-
-                    // Set adaptive verification timeout scaled to file size
-                    const ackTimeout = computeAdaptiveAckTimeout(file.size);
-                    logger.info(`ACK timeout for ${transferId}: ${ackTimeout}ms (file size: ${file.size} bytes)`);
-                    transferRecord.ackTimeoutId = setTimeout(() => {
-                        peersMap.forEach((peerState, peerId) => {
-                            if (peerState.status === 'sending' && !peerState.ackReceived) {
-                                peerState.status = 'failed';
-                                peerState.error = 'Receiver verification ACK timed out';
-                            }
-                        });
-                        this.checkTransferCompletion(transferId);
-                    }, ackTimeout);
+                    sendFileEndFooter();
                 }
             };
 
             reader.onerror = (e) => {
+                readInFlight = false;
                 logger.error(`FileReader error on file ${safeName}:`, e);
                 this.showToast(`Error reading file "${safeName}"`, 'error');
                 this.finalizeSendTransfer(transferId, false, 'File reading error');
             };
 
             reader.onabort = () => {
+                readInFlight = false;
                 logger.warn(`FileReader aborted for file ${safeName}`);
                 this.finalizeSendTransfer(transferId, false, 'File transfer cancelled');
             };
+
+            if (file.size === 0) {
+                // Zero-byte file: still emit the single empty chunk the
+                // protocol expects (totalChunks === 1), then the footer.
+                dispatchChunk(new ArrayBuffer(0));
+                sendFileEndFooter();
+                return;
+            }
 
             // Kick off streaming
             sendNextChunk();
@@ -1450,47 +1792,111 @@ class VeloApp {
     }
 
     /**
-     * Handlers for Receiver ACK
+     * Receiver consented to the transfer: unlock chunk streaming for that peer.
+     */
+    handleFileAccept(peerId, data) {
+        const transfer = this.activeSends.get(data.transferId);
+        if (!transfer) return;
+
+        const peerState = transfer.peers.get(peerId);
+        if (peerState && peerState.status === 'awaiting-accept') {
+            peerState.status = 'sending';
+            peerState.accepted = true;
+            logger.info(`Receiver ${peerId} accepted transfer ${data.transferId}`);
+
+            const anyAwaiting = Array.from(transfer.peers.values()).some(p => p.status === 'awaiting-accept');
+            if (!anyAwaiting && transfer.acceptTimeoutId) {
+                clearTimeout(transfer.acceptTimeoutId);
+                transfer.acceptTimeoutId = null;
+            }
+        }
+    }
+
+    /**
+     * Handles Receiver ACK. An ACK is only legal AFTER file-end was sent to
+     * that peer AND it carries status 'ok'; anything else is a protocol error.
      */
     handleFileCompleteAck(peerId, data) {
         const transfer = this.activeSends.get(data.transferId);
         if (!transfer) return;
 
         const peerState = transfer.peers.get(peerId);
-        if (peerState) {
-            peerState.status = 'complete';
-            peerState.ackReceived = true;
-            logger.info(`Received completion ACK from ${peerId} for transfer ${data.transferId}`);
+        if (!peerState) return;
+
+        if (!peerState.endSent) {
+            logger.warn(`Protocol violation: file-complete-ack from ${peerId} before file-end (transfer ${data.transferId})`);
+            peerState.status = 'failed';
+            peerState.error = 'Protocol violation: unexpected ACK';
+            this.checkTransferCompletion(data.transferId);
+            return;
         }
 
+        if (data.status !== 'ok') {
+            logger.warn(`Receiver ${peerId} acknowledged transfer ${data.transferId} with status '${data.status}'`);
+            peerState.status = 'failed';
+            peerState.error = `Receiver reported status '${data.status}'`;
+            this.checkTransferCompletion(data.transferId);
+            return;
+        }
+
+        peerState.status = 'complete';
+        peerState.ackReceived = true;
+        logger.info(`Received completion ACK from ${peerId} for transfer ${data.transferId}`);
         this.checkTransferCompletion(data.transferId);
     }
 
     handleFileError(peerId, data) {
-        const transfer = this.activeSends.get(data.transferId);
-        if (!transfer) return;
+        const transferId = data?.transferId;
+        if (typeof transferId !== 'string') return;
 
-        const peerState = transfer.peers.get(peerId);
-        if (peerState) {
-            peerState.status = 'failed';
-            peerState.error = data.error || 'Receiver error';
-            logger.warn(`Receiver ${peerId} reported error on transfer ${data.transferId}:`, data.error);
-            this.showToast(`Peer reported error on "${transfer.name}": ${data.error}`, 'error');
+        // Sender role: a receiver reported an error on our transfer
+        const transfer = this.activeSends.get(transferId);
+        if (transfer) {
+            const peerState = transfer.peers.get(peerId);
+            if (peerState && peerState.status !== 'complete') {
+                peerState.status = 'failed';
+                peerState.error = data.error || 'Receiver error';
+                logger.warn(`Receiver ${peerId} reported error on transfer ${transferId}:`, data.error);
+                this.showToast(`Peer reported error on "${transfer.name}": ${data.error}`, 'error');
+            }
+            this.checkTransferCompletion(transferId);
+            return;
         }
 
-        this.checkTransferCompletion(data.transferId);
+        // Receiver role: the SENDER reported a failure — clean up our receive
+        // record, free its chunks and concurrency slot.
+        const compositeKey = `${peerId}:${transferId}`;
+        const receive = this.activeReceives.get(compositeKey);
+        if (receive) {
+            logger.warn(`Sender ${peerId} reported error on receive ${transferId}: ${data.error || 'unknown'}`);
+            this.cleanupReceive(compositeKey, data.error || 'Sender reported an error');
+        }
     }
 
     handleFileCancel(peerId, data) {
-        // Peer cancelled receiving
-        const transfer = this.activeSends.get(data.transferId);
+        const transferId = data?.transferId;
+        if (typeof transferId !== 'string') return;
+
+        // Sender role: receiver cancelled the download
+        const transfer = this.activeSends.get(transferId);
         if (transfer) {
             const peerState = transfer.peers.get(peerId);
-            if (peerState) {
+            if (peerState && peerState.status !== 'complete') {
                 peerState.status = 'failed';
                 peerState.error = 'Peer cancelled download';
             }
-            this.checkTransferCompletion(data.transferId);
+            this.checkTransferCompletion(transferId);
+            return;
+        }
+
+        // Receiver role: the SENDER cancelled — remove the matching
+        // activeReceives entry (peerId:transferId), free its chunks, update
+        // the UI, and free its concurrency slot.
+        const compositeKey = `${peerId}:${transferId}`;
+        const receive = this.activeReceives.get(compositeKey);
+        if (receive) {
+            logger.warn(`Sender ${peerId} cancelled receive transfer ${transferId}`);
+            this.cleanupReceive(compositeKey, 'Cancelled by sender');
         }
     }
 
@@ -1504,33 +1910,76 @@ class VeloApp {
                 clearTimeout(transfer.ackTimeoutId);
                 transfer.ackTimeoutId = null;
             }
+            if (transfer.acceptTimeoutId) {
+                clearTimeout(transfer.acceptTimeoutId);
+                transfer.acceptTimeoutId = null;
+            }
 
             const anySuccess = Array.from(transfer.peers.values()).some(p => p.status === 'complete');
             this.finalizeSendTransfer(transferId, anySuccess);
         }
     }
 
+    /**
+     * Notifies all peers that did NOT complete that the send failed. Receivers
+     * use this to clean up stalled receive state.
+     */
+    notifyPeersOfSendFailure(transfer, reason) {
+        transfer.peers.forEach((peerState, peerId) => {
+            if (peerState.status === 'complete') return;
+            const conn = this.connections.get(peerId)?.conn;
+            if (conn) {
+                try {
+                    conn.send({ type: 'file-error', transferId: transfer.id, error: reason });
+                } catch (e) {}
+            }
+        });
+    }
+
     finalizeSendTransfer(transferId, success, failureReason = '') {
         const transfer = this.activeSends.get(transferId);
         if (!transfer) return;
 
+        // Clear any outstanding timers
+        if (transfer.ackTimeoutId) { clearTimeout(transfer.ackTimeoutId); transfer.ackTimeoutId = null; }
+        if (transfer.acceptTimeoutId) { clearTimeout(transfer.acceptTimeoutId); transfer.acceptTimeoutId = null; }
+
         if (success) {
             this.completeTransferUI(transferId, transfer.size, transfer.startTime);
             this.saveHistory({ name: transfer.name, size: transfer.size, peer: 'Peers' }, 'send');
-            this.showToast(`Sent: ${transfer.name}`, 'success');
-            this.triggerConfetti();
 
-            if (transfer.queueId) {
-                const q = this.queuedFiles.find(i => i.id === transfer.queueId);
-                if (q) q.status = 'completed';
-            }
+            // Per-peer outcome instead of a blanket "Sent"
+            const okPeers = [];
+            const failedPeers = [];
+            transfer.peers.forEach((peerState, peerId) => {
+                const name = this.connections.get(peerId)?.username || peerId;
+                if (peerState.status === 'complete') okPeers.push(name);
+                else failedPeers.push(`${name}${peerState.error ? ` (${peerState.error})` : ''}`);
+            });
+
+            let toast = `Sent: ${transfer.name}`;
+            if (okPeers.length) toast += ` — delivered to ${okPeers.join(', ')}`;
+            if (failedPeers.length) toast += ` — failed for ${failedPeers.join(', ')}`;
+            this.showToast(toast, failedPeers.length ? 'warning' : 'success');
+            if (failedPeers.length === 0) this.playCompletionSound();
         } else {
+            // Tell receivers the send failed so they can clean up
+            this.notifyPeersOfSendFailure(transfer, failureReason || 'Transfer failed');
             this.failTransferUI(transferId, failureReason || 'Transfer failed');
-            if (transfer.queueId) {
-                const q = this.queuedFiles.find(i => i.id === transfer.queueId);
-                if (q) q.status = 'failed';
+            this.showToast(`Failed to send ${transfer.name}: ${failureReason || 'unknown error'}`, 'error');
+        }
+
+        if (transfer.queueId) {
+            const q = this.queuedFiles.find(i => i.id === transfer.queueId);
+            if (q) {
+                q.status = success ? 'completed' : 'failed';
+                q.file = null; // Release the File reference
             }
         }
+
+        // Release the File reference and reader
+        transfer.file = null;
+        transfer.reader = null;
 
         this.activeSends.delete(transferId);
         this.updateQueueUI();
@@ -1543,7 +1992,7 @@ class VeloApp {
     // ==================== FILE TRANSFER: RECEIVER ====================
 
     receiveFileStart(peerId, data) {
-        // Validate metadata strictly
+        // Validate metadata strictly (sha256 mandatory)
         const validation = validateFileStartMetadata(data);
         if (!validation.valid) {
             logger.warn(`Rejected invalid file-start metadata from ${peerId}:`, validation.error);
@@ -1563,55 +2012,283 @@ class VeloApp {
 
         const { transferId, name: safeName, size, totalChunks, chunkSize, sha256: expectedSha256 } = validation.sanitized;
 
-        // Concurrent receives check per peer
-        let activeForPeer = 0;
-        for (const r of this.activeReceives.values()) {
-            if (r.peerId === peerId) activeForPeer++;
-        }
-        if (activeForPeer >= ProtocolConstants.MAX_CONCURRENT_RECEIVES) {
-            logger.warn(`Rejecting transfer ${transferId} from ${peerId}: reached MAX_CONCURRENT_RECEIVES (${activeForPeer})`);
-            const conn = this.connections.get(peerId)?.conn;
-            if (conn) {
-                try {
-                    conn.send({
-                        type: 'file-error',
-                        transferId,
-                        error: `Concurrency limit reached (${ProtocolConstants.MAX_CONCURRENT_RECEIVES} active transfers max)`
-                    });
-                } catch (e) {}
-            }
-            this.showToast(`Transfer rejected: too many active downloads from this peer`, 'warning');
-            return;
-        }
-
         const compositeKey = `${peerId}:${transferId}`;
         if (this.activeReceives.has(compositeKey)) {
             logger.warn(`Duplicate transferId ${transferId} from ${peerId}`);
             return;
         }
 
-        logger.info(`Receiving file-start from ${peerId}: ${safeName} (${size} bytes, ${totalChunks} chunks)`);
+        const reject = (error) => {
+            const conn = this.connections.get(peerId)?.conn;
+            if (conn) {
+                try {
+                    conn.send({ type: 'file-error', transferId, error });
+                } catch (e) {}
+            }
+            this.showToast(`Transfer rejected: ${error}`, 'warning');
+        };
 
+        // Per-peer concurrency cap
+        let activeForPeer = 0;
+        for (const r of this.activeReceives.values()) {
+            if (r.peerId === peerId) activeForPeer++;
+        }
+        if (activeForPeer >= ProtocolConstants.MAX_CONCURRENT_RECEIVES) {
+            logger.warn(`Rejecting transfer ${transferId} from ${peerId}: reached MAX_CONCURRENT_RECEIVES (${activeForPeer})`);
+            reject(`Concurrency limit reached (${ProtocolConstants.MAX_CONCURRENT_RECEIVES} active transfers max per peer)`);
+            return;
+        }
+
+        // Global concurrency cap
+        if (this.activeReceives.size >= ProtocolConstants.MAX_ACTIVE_RECEIVES_TOTAL) {
+            logger.warn(`Rejecting transfer ${transferId} from ${peerId}: global receive cap reached`);
+            reject(`Too many concurrent incoming transfers (${ProtocolConstants.MAX_ACTIVE_RECEIVES_TOTAL} max)`);
+            return;
+        }
+
+        // Aggregate buffered-bytes cap across ALL active receives
+        let aggregateBytes = 0;
+        for (const r of this.activeReceives.values()) {
+            aggregateBytes += Math.max(0, r.size - r.receivedBytes);
+        }
+        if (aggregateBytes + size > ProtocolConstants.MAX_AGGREGATE_RECEIVE_BUFFER) {
+            logger.warn(`Rejecting transfer ${transferId} from ${peerId}: aggregate receive buffer cap reached`);
+            reject('Incoming transfer buffer limit reached. Try again after current transfers finish.');
+            return;
+        }
+
+        const senderName = this.connections.get(peerId)?.username || peerId;
+        logger.info(`file-start from ${peerId}: ${safeName} (${size} bytes, ${totalChunks} chunks) — requesting consent`);
+
+        // Consent-gated intake: no chunks are allocated or accepted until the
+        // user explicitly accepts.
         const receiveRecord = {
             compositeKey,
             transferId,
             peerId,
+            senderName,
             name: safeName,
             size,
             totalChunks,
             chunkSize,
             sha256: expectedSha256,
-            chunks: new Array(totalChunks),
+            state: 'awaiting-consent', // 'awaiting-consent' -> 'receiving' -> 'verifying' -> 'completed' | 'failed'
+            chunks: null,              // allocated on accept
             receivedBytes: 0,
             receivedChunks: new Set(),
             startTime: Date.now(),
+            lastProgressAt: Date.now(),
             lastUpdate: Date.now(),
             lastBytes: 0,
-            lastUiUpdate: 0
+            lastUiUpdate: 0,
+            receivedInOrder: true,
+            expectedNextSeq: 0
         };
 
         this.activeReceives.set(compositeKey, receiveRecord);
-        this.addTransferToUI(transferId, safeName, size, 'receive');
+        this.showFileConsentPrompt(compositeKey, receiveRecord);
+    }
+
+    // ==================== INCOMING TRANSFER CONSENT (ABUSE CONTROL) ====================
+
+    showFileConsentPrompt(compositeKey, receive) {
+        const senderName = receive.senderName;
+        const modal = document.createElement('div');
+        modal.className = 'velo-consent-modal';
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 250;';
+
+        const card = document.createElement('div');
+        card.style.cssText = 'background: var(--bg-surface); border-radius: 24px; padding: 2rem; max-width: 420px; width: 90%; border: 1px solid var(--border-light); text-align: center;';
+
+        const title = document.createElement('h3');
+        title.style.marginBottom = '0.5rem';
+        title.textContent = 'Incoming file';
+        card.appendChild(title);
+
+        const desc = document.createElement('p');
+        desc.style.cssText = 'color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;';
+        desc.textContent = `${senderName} wants to send you:`;
+        card.appendChild(desc);
+
+        const fileInfo = document.createElement('div');
+        fileInfo.style.cssText = 'background: var(--bg-main); padding: 0.85rem; border-radius: 12px; margin-bottom: 1.25rem; font-weight: 600; word-break: break-word;';
+        fileInfo.textContent = `${receive.name} (${this.formatBytes(receive.size)})`;
+        card.appendChild(fileInfo);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display: flex; gap: 0.75rem;';
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'btn-primary';
+        acceptBtn.style.flex = '1';
+        acceptBtn.textContent = 'Accept';
+        acceptBtn.onclick = () => this.acceptIncomingTransfer(compositeKey);
+        btnRow.appendChild(acceptBtn);
+
+        const declineBtn = document.createElement('button');
+        declineBtn.className = 'btn-ghost';
+        declineBtn.style.flex = '1';
+        declineBtn.textContent = 'Decline';
+        declineBtn.onclick = () => this.declineIncomingTransfer(compositeKey, 'Declined by you');
+        btnRow.appendChild(declineBtn);
+
+        card.appendChild(btnRow);
+        modal.appendChild(card);
+        modal.onclick = (e) => { if (e.target === modal) this.declineIncomingTransfer(compositeKey, 'Declined by you'); };
+        document.body.appendChild(modal);
+
+        receive.consentModal = modal;
+        this.pendingConsents.set(compositeKey, {
+            peerId: receive.peerId,
+            transferId: receive.transferId,
+            requestedAt: Date.now(),
+            modal
+        });
+    }
+
+    acceptIncomingTransfer(compositeKey) {
+        const receive = this.activeReceives.get(compositeKey);
+        const consent = this.pendingConsents.get(compositeKey);
+        this.pendingConsents.delete(compositeKey);
+        if (consent?.modal) { try { consent.modal.remove(); } catch (e) {} }
+        if (!receive || receive.state !== 'awaiting-consent') return;
+
+        logger.info(`Transfer ${receive.transferId} accepted by user`);
+        receive.state = 'receiving';
+        receive.chunks = new Array(receive.totalChunks);
+        receive.lastProgressAt = Date.now();
+
+        const conn = this.connections.get(receive.peerId)?.conn;
+        if (conn) {
+            try {
+                conn.send({ type: 'file-accept', transferId: receive.transferId });
+            } catch (e) {}
+        }
+
+        this.addTransferToUI(receive.transferId, receive.name, receive.size, 'receive');
+    }
+
+    declineIncomingTransfer(compositeKey, reason = 'Declined by you') {
+        const receive = this.activeReceives.get(compositeKey);
+        const consent = this.pendingConsents.get(compositeKey);
+        this.pendingConsents.delete(compositeKey);
+        if (consent?.modal) { try { consent.modal.remove(); } catch (e) {} }
+        if (!receive || receive.state !== 'awaiting-consent') return;
+
+        const conn = this.connections.get(receive.peerId)?.conn;
+        if (conn) {
+            try {
+                conn.send({ type: 'file-cancel', transferId: receive.transferId });
+            } catch (e) {}
+        }
+        this.activeReceives.delete(compositeKey);
+        this.showToast(`Declined incoming file "${receive.name}"${reason ? `: ${reason}` : ''}`, 'info');
+    }
+
+    /**
+     * Removes a receive record: frees chunks + concurrency slot and updates UI.
+     */
+    cleanupReceive(compositeKey, reason) {
+        const receive = this.activeReceives.get(compositeKey);
+        if (!receive) return;
+
+        this.pendingConsents.delete(compositeKey);
+        if (receive.consentModal) { try { receive.consentModal.remove(); } catch (e) {} }
+
+        this.activeReceives.delete(compositeKey); // frees the concurrency slot
+        receive.chunks = null;                    // free buffered chunk memory
+
+        if (receive.state !== 'awaiting-consent') {
+            this.failTransferUI(receive.transferId, reason || 'Transfer aborted');
+        }
+        this.showToast(`Transfer of ${receive.name} aborted${reason ? ` (${reason})` : ''}`, 'error');
+    }
+
+    /**
+     * Housekeeping sweep: reaps receives with no chunk progress (stalled
+     * transfers) and expired consent requests.
+     */
+    sweepStalledReceives() {
+        const now = Date.now();
+
+        this.activeReceives.forEach((receive, key) => {
+            if (receive.state === 'receiving' &&
+                now - receive.lastProgressAt > ProtocolConstants.RECEIVE_IDLE_TIMEOUT_MS) {
+                logger.warn(`Receive ${receive.transferId} stalled (${ProtocolConstants.RECEIVE_IDLE_TIMEOUT_MS}ms without progress). Cleaning up.`);
+                const conn = this.connections.get(receive.peerId)?.conn;
+                if (conn) {
+                    try { conn.send({ type: 'file-cancel', transferId: receive.transferId }); } catch (e) {}
+                }
+                this.cleanupReceive(key, 'Timed out (no progress)');
+            } else if (receive.state === 'awaiting-consent' &&
+                now - receive.lastProgressAt > ProtocolConstants.CONSENT_TIMEOUT_MS) {
+                this.declineIncomingTransfer(key, 'Consent request expired');
+            }
+        });
+    }
+
+    startSweeping() {
+        if (this.sweepInterval) return;
+        this.sweepInterval = setInterval(() => this.sweepStalledReceives(), 5000);
+    }
+
+    stopSweeping() {
+        if (this.sweepInterval) {
+            clearInterval(this.sweepInterval);
+            this.sweepInterval = null;
+        }
+    }
+
+    // ==================== PER-PEER BLOCKING ====================
+
+    loadBlockedPeers() {
+        try {
+            const raw = localStorage.getItem('velo_blocked_peers');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    parsed.forEach(id => {
+                        if (typeof id === 'string') this.blockedPeers.add(id);
+                    });
+                }
+            }
+        } catch (e) {}
+    }
+
+    saveBlockedPeers() {
+        try {
+            localStorage.setItem('velo_blocked_peers', JSON.stringify(Array.from(this.blockedPeers)));
+        } catch (e) {}
+    }
+
+    /**
+     * Blocks a peer: closes any live connection, refuses future inbound
+     * connections, and removes them from transfer/selection state.
+     */
+    blockPeer(peerId) {
+        if (!peerId) return;
+        this.blockedPeers.add(peerId);
+        this.saveBlockedPeers();
+
+        const info = this.connections.get(peerId);
+        if (info) {
+            try { info.conn?.close(); } catch (e) {}
+            this.handlePeerDisconnect(peerId);
+            this.showToast(`Blocked ${info.username || peerId}`, 'info');
+        }
+        this.updatePeerList();
+    }
+
+    unblockPeer(peerId) {
+        if (!peerId) return;
+        this.blockedPeers.delete(peerId);
+        this.saveBlockedPeers();
+        this.showToast(`${peerId} unblocked`, 'info');
+        this.updatePeerList();
+    }
+
+    isPeerBlocked(peerId) {
+        return this.blockedPeers.has(peerId);
     }
 
     receiveFileChunkFramed(peerId, { transferId, sequenceNumber, payload }) {
@@ -1622,6 +2299,13 @@ class VeloApp {
             return;
         }
 
+        // State machine: chunks are only meaningful while 'receiving'. Anything
+        // arriving before consent or during verification is dropped.
+        if (receive.state !== 'receiving') {
+            logger.warn(`Chunk for transfer ${transferId} ignored (state: ${receive.state})`);
+            return;
+        }
+
         if (receive.peerId !== peerId) {
             logger.warn(`Chunk sender mismatch for transfer ${transferId}: expected ${receive.peerId}, got ${peerId}`);
             return;
@@ -1629,15 +2313,40 @@ class VeloApp {
 
         if (sequenceNumber >= receive.totalChunks) {
             logger.warn(`Sequence number ${sequenceNumber} out of bounds (max ${receive.totalChunks})`);
+            this.abortReceiveWithProtocolError(receive, `Chunk sequence out of bounds (${sequenceNumber})`);
             return;
         }
 
-        if (!receive.receivedChunks.has(sequenceNumber)) {
-            receive.chunks[sequenceNumber] = payload;
-            receive.receivedChunks.add(sequenceNumber);
-            receive.receivedBytes += payload.byteLength;
-            this.totalBytesTransferred += payload.byteLength;
+        // Exact per-chunk length: every chunk must be min(chunkSize, remaining).
+        // For a zero-byte file the single expected chunk has length 0.
+        const expectedLen = Math.min(receive.chunkSize, receive.size - sequenceNumber * receive.chunkSize);
+        if (payload.byteLength !== expectedLen) {
+            logger.warn(`Chunk ${sequenceNumber} length mismatch for ${transferId}: got ${payload.byteLength}, expected ${expectedLen}`);
+            this.abortReceiveWithProtocolError(receive, `Chunk ${sequenceNumber} has wrong length`);
+            return;
         }
+
+        if (receive.receivedChunks.has(sequenceNumber)) {
+            logger.log(`Duplicate chunk ${sequenceNumber} for ${transferId} ignored`);
+            return;
+        }
+
+        // Cumulative overflow guard: never accept more bytes than advertised
+        if (receive.receivedBytes + payload.byteLength > receive.size) {
+            logger.warn(`Cumulative bytes exceed advertised size for ${transferId}`);
+            this.abortReceiveWithProtocolError(receive, 'Received more bytes than advertised');
+            return;
+        }
+
+        receive.chunks[sequenceNumber] = payload;
+        receive.receivedChunks.add(sequenceNumber);
+        receive.receivedBytes += payload.byteLength;
+        receive.lastProgressAt = Date.now();
+        if (sequenceNumber !== receive.expectedNextSeq) {
+            receive.receivedInOrder = false;
+        }
+        receive.expectedNextSeq = Math.max(receive.expectedNextSeq, sequenceNumber + 1);
+        this.totalBytesTransferred += payload.byteLength;
 
         // Throttle UI updates
         const now = Date.now();
@@ -1648,8 +2357,23 @@ class VeloApp {
         }
     }
 
+    /**
+     * Receiver-side protocol violation: notify sender, fail UI, free state.
+     */
+    abortReceiveWithProtocolError(receive, reason) {
+        const conn = this.connections.get(receive.peerId)?.conn;
+        if (conn) {
+            try {
+                conn.send({ type: 'file-error', transferId: receive.transferId, error: reason });
+            } catch (e) {}
+        }
+        this.cleanupReceive(receive.compositeKey, reason);
+    }
+
     async receiveFileEnd(peerId, data) {
-        const transferId = data.transferId;
+        const transferId = data?.transferId;
+        if (typeof transferId !== 'string') return;
+
         const compositeKey = `${peerId}:${transferId}`;
         const receive = this.activeReceives.get(compositeKey);
         if (!receive) return;
@@ -1659,12 +2383,27 @@ class VeloApp {
             return;
         }
 
+        // State machine: only ONE file-end is honored, and only from 'receiving'.
+        // Duplicates or late file-ends (during verification) are ignored.
+        if (receive.state !== 'receiving') {
+            logger.warn(`file-end for ${transferId} ignored (state: ${receive.state})`);
+            return;
+        }
+
+        // Mandatory digest: the protocol requires sha256 on every transfer
+        if (!receive.sha256) {
+            logger.warn(`file-end for ${transferId} rejected: no SHA-256 digest`);
+            this.abortReceiveWithProtocolError(receive, 'Transfer missing SHA-256 digest');
+            return;
+        }
+
+        receive.state = 'verifying';
         logger.info(`Received file-end for ${transferId}. Verifying integrity...`);
         this.setTransferVerifyingUI(transferId);
 
         const conn = this.connections.get(peerId)?.conn;
 
-        // 1. Verify chunk count & byte length
+        // 1. Verify chunk count
         if (receive.receivedChunks.size !== receive.totalChunks) {
             logger.error(`Chunk count mismatch: got ${receive.receivedChunks.size} of ${receive.totalChunks}`);
             if (conn) {
@@ -1678,6 +2417,8 @@ class VeloApp {
             }
             this.failTransferUI(transferId, 'Corrupted transfer: missing chunks');
             this.activeReceives.delete(compositeKey);
+            receive.chunks = null;
+            this.showToast(`Transfer of ${receive.name} failed: missing chunks`, 'error');
             return;
         }
 
@@ -1699,45 +2440,48 @@ class VeloApp {
             }
             this.failTransferUI(transferId, 'Corrupted transfer: byte count mismatch');
             this.activeReceives.delete(compositeKey);
+            this.showToast(`Transfer of ${receive.name} failed: byte count mismatch`, 'error');
             return;
         }
 
         // 3. Verify SHA-256 Checksum (FAIL-CLOSED: any error or mismatch aborts transfer)
-        if (receive.sha256) {
-            try {
-                const computedHash = await computeSha256(blob);
-                if (computedHash.toLowerCase() !== receive.sha256.toLowerCase()) {
-                    logger.error(`SHA-256 mismatch! Expected: ${receive.sha256}, computed: ${computedHash}`);
-                    if (conn) {
-                        try {
-                            conn.send({
-                                type: 'file-error',
-                                transferId,
-                                error: 'SHA-256 integrity verification failed'
-                            });
-                        } catch (e) {}
-                    }
-                    this.failTransferUI(transferId, 'Integrity verification failed (corrupted file)');
-                    this.activeReceives.delete(compositeKey);
-                    return;
-                }
-                logger.info(`SHA-256 verified successfully: ${computedHash}`);
-            } catch (err) {
-                logger.error('Error computing SHA-256 verification (failing closed):', err);
+        try {
+            const computedHash = await computeSha256(blob);
+            if (computedHash.toLowerCase() !== receive.sha256.toLowerCase()) {
+                logger.error(`SHA-256 mismatch! Expected: ${receive.sha256}, computed: ${computedHash}`);
                 if (conn) {
                     try {
                         conn.send({
                             type: 'file-error',
                             transferId,
-                            error: 'Integrity verification failed during SHA-256 computation'
+                            error: 'SHA-256 integrity verification failed'
                         });
                     } catch (e) {}
                 }
-                this.failTransferUI(transferId, 'Integrity check error (transfer aborted)');
+                this.failTransferUI(transferId, 'Integrity verification failed (corrupted file)');
                 this.activeReceives.delete(compositeKey);
+                this.showToast(`Transfer of ${receive.name} failed integrity verification`, 'error');
                 return;
             }
+            logger.info(`SHA-256 verified successfully: ${computedHash}`);
+        } catch (err) {
+            logger.error('Error computing SHA-256 verification (failing closed):', err);
+            if (conn) {
+                try {
+                    conn.send({
+                        type: 'file-error',
+                        transferId,
+                        error: 'Integrity verification failed during SHA-256 computation'
+                    });
+                } catch (e) {}
+            }
+            this.failTransferUI(transferId, 'Integrity check error (transfer aborted)');
+            this.activeReceives.delete(compositeKey);
+            this.showToast(`Transfer of ${receive.name} failed during integrity check`, 'error');
+            return;
         }
+
+        receive.state = 'completed';
 
         // 4. Send Completion ACK
         if (conn) {
@@ -1765,7 +2509,7 @@ class VeloApp {
         this.completeTransferUI(transferId, receive.size, receive.startTime);
         this.saveHistory({ name: receive.name, size: receive.size, peer: peerId }, 'receive');
         this.showToast(`Received: ${receive.name}`, 'success');
-        this.triggerConfetti();
+        this.playCompletionSound();
 
         this.activeReceives.delete(compositeKey);
     }
@@ -1799,6 +2543,10 @@ class VeloApp {
         // 2. Check active receives (keyed by compositeKey or transferId)
         for (const [key, receive] of this.activeReceives.entries()) {
             if (receive.transferId === id || key === id) {
+                if (receive.state === 'awaiting-consent') {
+                    this.declineIncomingTransfer(key, 'Cancelled by you');
+                    return;
+                }
                 const conn = this.connections.get(receive.peerId)?.conn;
                 if (conn) {
                     try {
@@ -1806,6 +2554,7 @@ class VeloApp {
                     } catch (e) {}
                 }
                 this.activeReceives.delete(key);
+                receive.chunks = null; // free buffered chunks + concurrency slot
                 this.failTransferUI(receive.transferId, 'Cancelled by user');
                 this.showToast(`Cancelled receive: ${receive.name}`, 'info');
                 return;
@@ -1816,8 +2565,9 @@ class VeloApp {
         const qItem = this.queuedFiles.find(i => i.id === id);
         if (qItem && qItem.status === 'pending') {
             qItem.status = 'cancelled';
+            qItem.file = null; // Release the File reference
             this.updateQueueUI();
-            this.showToast(`Removed from queue: ${qItem.file.name}`, 'info');
+            this.showToast(`Removed from queue: ${qItem.name || 'file'}`, 'info');
         }
     }
 
@@ -2057,6 +2807,7 @@ class VeloApp {
     // ==================== SPEED TRACKING & STATS ====================
 
     startSpeedTracking() {
+        this.startSweeping();
         if (this.speedInterval) return;
         this.speedInterval = setInterval(() => this.updateGlobalStats(), 500);
     }
@@ -2576,7 +3327,7 @@ class VeloApp {
         document.body.appendChild(modal);
     }
 
-    // ==================== TEXT SHARING VIA LINK ====================
+    // ==================== TEXT SHARING (DIRECT + ONE-TIME LINK) ====================
 
     showTextShareModal() {
         if (!this.myPeerId) {
@@ -2601,7 +3352,7 @@ class VeloApp {
 
         const sub = document.createElement('p');
         sub.style.cssText = 'color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.9rem;';
-        sub.textContent = 'Text is streamed peer-to-peer over WebRTC—never saved on any server.';
+        sub.textContent = 'Text is streamed peer-to-peer over WebRTC—never saved on any server. Only peers connected right now receive it.';
         card.appendChild(sub);
 
         const textarea = document.createElement('textarea');
@@ -2621,21 +3372,64 @@ class VeloApp {
             }
 
             const safe = sanitizeText(raw);
-            const token = generateUuid();
-            this.activeTextShare = { token, text: safe, deliveredToPeers: new Set() };
-
             const targets = this.getTargetConnections();
+
+            // Zero targets is an error, never a silent no-op
+            if (targets.length === 0) {
+                this.showToast('No peers selected. Select at least one peer or choose "Send to All".', 'error');
+                return;
+            }
+
+            let delivered = 0;
             targets.forEach(({ conn }) => {
                 try {
-                    conn.send({ type: 'text-share', token, text: safe });
-                    this.activeTextShare.deliveredToPeers.add(conn.peer);
+                    conn.send({ type: 'text-share', text: safe });
+                    delivered++;
                 } catch (e) {}
             });
 
-            this.showToast('Text sent to peers!', 'success');
+            if (delivered === 0) {
+                this.showToast('Failed to send text: no peer could be contacted.', 'error');
+                return;
+            }
+
+            // Fire-and-forget: nothing is retained for peers joining later
+            this.showToast(`Text sent to ${delivered} peer(s).`, 'success');
             modal.remove();
         };
         card.appendChild(sendBtn);
+
+        const linkBtn = document.createElement('button');
+        linkBtn.className = 'btn-ghost';
+        linkBtn.style.cssText = 'width: 100%; padding: 0.75rem; margin-bottom: 0.75rem;';
+        linkBtn.textContent = 'Create One-Time Text Link';
+        linkBtn.onclick = () => {
+            const raw = textarea.value.trim();
+            if (!raw) {
+                this.showToast('Enter some text to share', 'error');
+                return;
+            }
+
+            const safe = sanitizeText(raw);
+            const token = generateUuid();
+            // One-time, expiring link token. The token is required verbatim:
+            // a peer without the exact token never receives the text.
+            this.activeTextLink = {
+                token,
+                text: safe,
+                expiresAt: Date.now() + ProtocolConstants.TEXT_SHARE_LINK_TTL_MS,
+                used: false
+            };
+
+            const base = this.generateShareLink();
+            const link = `${base}&t=${encodeURIComponent(token)}`;
+
+            navigator.clipboard.writeText(link)
+                .then(() => this.showToast('One-time text link copied! It expires in 10 minutes.', 'success'))
+                .catch(() => this.showToast('Link created but could not be copied: ' + link, 'warning'));
+            modal.remove();
+        };
+        card.appendChild(linkBtn);
 
         const closeBtn = document.createElement('button');
         closeBtn.className = 'btn-ghost';
@@ -2649,10 +3443,114 @@ class VeloApp {
         document.body.appendChild(modal);
     }
 
+    /**
+     * Called when a peer connects presenting a text-share token. Delivers the
+     * active one-time link text ONLY on an exact, unexpired, unused token
+     * match; the link is single-use and cleared after delivery.
+     */
+    deliverTextLinkIfMatched(peerId, receiverToken) {
+        if (!this.activeTextLink) return;
+
+        const link = this.activeTextLink;
+        if (link.used || Date.now() > link.expiresAt) {
+            this.activeTextLink = null;
+            if (receiverToken) {
+                const conn = this.connections.get(peerId)?.conn;
+                try { conn?.send({ type: 'text-share-miss', token: receiverToken }); } catch (e) {}
+            }
+            return;
+        }
+
+        const conn = this.connections.get(peerId)?.conn;
+        if (!conn) return;
+
+        if (!receiverToken || receiverToken !== link.token) {
+            // No token or wrong token = no text. Never send to tokenless peers.
+            logger.warn(`Text link token mismatch from ${peerId}`);
+            if (receiverToken) {
+                try { conn.send({ type: 'text-share-miss', token: receiverToken }); } catch (e) {}
+            }
+            return;
+        }
+
+        try {
+            conn.send({ type: 'text-share', token: link.token, text: link.text });
+            link.used = true;
+            this.activeTextLink = null; // one-time: cleared after delivery
+            logger.info(`One-time text link delivered to ${peerId}`);
+        } catch (e) {}
+    }
+
     handleTextShare(peerId, data) {
         if (typeof data.text !== 'string') return;
+        const senderName = this.connections.get(peerId)?.username || peerId;
         const safe = sanitizeText(data.text);
+        const linkToken = typeof data.token === 'string' ? data.token : null;
 
+        // Link flow: the receiver must have requested this exact token via the
+        // share link. No token requested -> refuse link-based delivery.
+        if (linkToken && linkToken !== this.textShareTokenFromUrl) {
+            logger.warn(`Text share token mismatch from ${peerId}; ignoring.`);
+            return;
+        }
+
+        // Consent prompt: incoming text is never shown without user approval
+        const modal = document.createElement('div');
+        modal.className = 'velo-consent-modal';
+        modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 250;';
+
+        const card = document.createElement('div');
+        card.style.cssText = 'background: var(--bg-surface); border-radius: 24px; padding: 2rem; max-width: 650px; width: 95%; border: 1px solid var(--border-light); text-align: center; max-height: 85vh; overflow-y: auto;';
+
+        const title = document.createElement('h2');
+        title.style.marginBottom = '0.5rem';
+        title.textContent = 'Incoming text';
+        card.appendChild(title);
+
+        const desc = document.createElement('p');
+        desc.style.cssText = 'color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;';
+        desc.textContent = `${senderName} sent you ${safe.length} characters of text.`;
+        card.appendChild(desc);
+
+        const preview = document.createElement('pre');
+        preview.style.cssText = 'white-space: pre-wrap; word-break: break-word; max-height: 20vh; overflow: auto; background: var(--bg-main); padding: 1rem; border-radius: 12px; border: 1px solid var(--border-light); color: var(--text-primary); font-family: monospace; text-align: left; margin-bottom: 1.25rem;';
+        preview.textContent = safe.slice(0, 500) + (safe.length > 500 ? '…' : '');
+        card.appendChild(preview);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display: flex; gap: 0.75rem; margin-bottom: 0.75rem;';
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'btn-primary';
+        acceptBtn.style.flex = '1';
+        acceptBtn.textContent = 'Accept';
+        acceptBtn.onclick = () => {
+            modal.remove();
+            this.showReceivedTextModal(safe);
+        };
+        btnRow.appendChild(acceptBtn);
+
+        const declineBtn = document.createElement('button');
+        declineBtn.className = 'btn-ghost';
+        declineBtn.style.flex = '1';
+        declineBtn.textContent = 'Decline';
+        declineBtn.onclick = () => {
+            modal.remove();
+            this.showToast(`Declined text from ${senderName}`, 'info');
+        };
+        btnRow.appendChild(declineBtn);
+
+        card.appendChild(btnRow);
+        modal.appendChild(card);
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+        document.body.appendChild(modal);
+
+        if (linkToken) {
+            this.textShareTokenFromUrl = null; // token consumed
+        }
+    }
+
+    showReceivedTextModal(safe) {
         const existing = document.getElementById('receivedTextModal');
         if (existing) existing.remove();
 
@@ -2750,9 +3648,18 @@ class VeloApp {
         textarea.style.cssText = 'width: 100%; min-height: 120px; background: var(--bg-main); border: 1px solid var(--border-light); border-radius: 8px; padding: 0.75rem; color: var(--text-primary); font-family: monospace; font-size: 0.8rem; margin-bottom: 1rem; outline: none;';
         textarea.placeholder = `[\n  {\n    "urls": ["turn:turn.example.com:3478"],\n    "username": "user",\n    "credential": "password"\n  }\n]`;
 
-        const saved = localStorage.getItem('velo_custom_ice_servers');
+        const saved = (() => {
+            try { return localStorage.getItem('velo_custom_ice_servers'); } catch (e) { return null; }
+        })();
         if (saved) textarea.value = saved;
         card.appendChild(textarea);
+
+        // Warn that applying new ICE servers re-inits the peer: the Peer ID
+        // and all previously shared links change and current peers drop.
+        const warn = document.createElement('p');
+        warn.style.cssText = 'color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1rem;';
+        warn.textContent = '⚠️ Applying new settings reconnects you with a NEW Peer ID. Previously shared links/QR codes stop working and connected peers are disconnected.';
+        card.appendChild(warn);
 
         // Buttons
         const btnRow = document.createElement('div');
@@ -2762,13 +3669,33 @@ class VeloApp {
         saveBtn.className = 'btn-primary';
         saveBtn.style.flex = '1';
         saveBtn.textContent = 'Save & Apply';
+        let saveArmed = false;
         saveBtn.onclick = () => {
+            // Two-step confirm: the first click arms the button so the user
+            // sees that the Peer ID will change before anything happens.
+            if (!saveArmed) {
+                saveArmed = true;
+                saveBtn.textContent = 'Confirm — my Peer ID will change';
+                setTimeout(() => {
+                    saveArmed = false;
+                    saveBtn.textContent = 'Save & Apply';
+                }, 4000);
+                return;
+            }
+            saveArmed = false;
+            saveBtn.textContent = 'Save & Apply';
+
             if (this.activeSends.size > 0 || this.activeReceives.size > 0 || this.isSending) {
                 this.showToast('Cannot change network settings during active transfers', 'error');
                 return;
             }
 
-            const val = textarea.value.trim();
+            let val;
+            try {
+                val = textarea.value.trim();
+            } catch (e) {
+                val = '';
+            }
             if (!val) {
                 if (window.VeloConfig) window.VeloConfig.setCustomIceServers(null);
                 this.showToast('Custom TURN servers cleared. Default STUN active.', 'info');
@@ -2786,7 +3713,7 @@ class VeloApp {
                 const parsed = JSON.parse(val);
                 if (!Array.isArray(parsed)) throw new Error('Must be a JSON array of server objects');
                 if (window.VeloConfig) window.VeloConfig.setCustomIceServers(parsed);
-                this.showToast('TURN configuration saved! Reconnecting...', 'success');
+                this.showToast('TURN configuration saved! Reconnecting with a new Peer ID...', 'success');
                 modal.remove();
                 // Safely destroy previous peer and re-initialize with new ICE servers
                 if (this.myPeerId) {
@@ -2932,7 +3859,7 @@ class VeloApp {
         } catch (e) {}
     }
 
-    triggerConfetti() {
+    playCompletionSound() {
         this.playSound('complete');
     }
 
@@ -3038,7 +3965,9 @@ if (typeof module !== 'undefined' && module.exports) {
         computeSha256,
         generateUuid,
         generatePeerId,
+        randomInt,
         sanitizeFilename,
+        sanitizeUsername,
         sanitizeText,
         validateFileStartMetadata,
         computeAdaptiveAckTimeout,

@@ -11,7 +11,12 @@ const ThemeManager = {
         this.iconMoon = document.querySelector('.icon-moon');
 
         // Check local storage or system preference
-        const savedTheme = localStorage.getItem('velo-theme');
+        let savedTheme = null;
+        try {
+            savedTheme = localStorage.getItem('velo-theme');
+        } catch (e) {
+            // localStorage unavailable (privacy mode etc.): fall back to system preference
+        }
         const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
         if (savedTheme) {
@@ -27,7 +32,9 @@ const ThemeManager = {
 
     setTheme(theme) {
         this.html.setAttribute('data-theme', theme);
-        localStorage.setItem('velo-theme', theme);
+        try {
+            localStorage.setItem('velo-theme', theme);
+        } catch (e) {}
         this.updateIcons(theme);
     },
 
