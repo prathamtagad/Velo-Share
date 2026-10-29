@@ -2791,7 +2791,8 @@ class VeloApp {
                     await receive.writable.close();
                     receive.writable = null;
                 }
-                blob = await receive.opfsRoot.getFileHandle(receive.opfsName).getFile();
+                const handle = await receive.opfsRoot.getFileHandle(receive.opfsName);
+                blob = await handle.getFile();
             } catch (err) {
                 logger.error(`Failed to flush OPFS sink for ${transferId}:`, err);
                 this.failTransferUI(transferId, 'Could not finalize streamed file');
