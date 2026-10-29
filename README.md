@@ -1,6 +1,6 @@
-# Velo - Production P2P File Transfer
+# Velo — Production P2P File Transfer
 
-**Velo** is a high-performance, browser-based peer-to-peer file transfer engine built on WebRTC DataChannels and PeerJS. It features end-to-end cryptographic SHA-256 integrity verification, binary chunk framing with sequence numbers, a formal fail-closed receiver ACK protocol, composite transfer ownership isolation, and multi-tier STUN/TURN NAT traversal.
+**Velo** is a browser-based peer-to-peer file transfer engine built on WebRTC DataChannels and PeerJS, featuring streaming SHA-256 integrity verification, binary chunk framing, a fail-closed receiver ACK protocol, and multi-tier STUN/TURN NAT traversal.
 
 Files stream directly between browsers over encrypted WebRTC lanes. No intermediate file relaying or storage servers are used.
 
@@ -8,112 +8,67 @@ Files stream directly between browsers over encrypted WebRTC lanes. No intermedi
 
 ## 🚀 Key Architectural Features
 
-- **Binary Framed Chunking**: 44-byte binary framing header (`VL` magic + version + 36-byte UUID + Uint32 sequence number + payload) prevents packet interleaving, detects out-of-order delivery, and runs at full WebRTC line speed without JSON/object serialization overhead.
-- **Fail-Closed Cryptographic SHA-256 Integrity**: Senders compute SHA-256 digests; receivers verify chunk counts, byte length, and recomputed SHA-256 before triggering downloads. Any mismatch or crypto exception immediately aborts the transfer, notifies the peer with `file-error`, and prevents download.
-- **Strict Metadata Validation**: Incoming `file-start` headers are strictly validated against a formal schema (RFC 4122 v4 UUID, bounded filename, finite safe integer sizes up to 2GB, valid chunk size, exact `totalChunks = Math.ceil(size / chunkSize)` equality, and 64-character hex hash).
-- **Composite Transfer Ownership**: All receiver transfers are keyed by composite identity (`${peerId}:${transferId}`). Incoming chunks and completion commands are checked against the originating peer ID, eliminating transfer collisions and cross-peer injection.
-- **Adaptive Verification ACK Timeout**: Replaced arbitrary static timeouts with an adaptive timeout dynamically scaled to file size: `clamp(30s, 30s + (fileSize / 15MB/s), 300s)`.
-- **Multi-Tier STUN/TURN Merging**: True deduplicating ICE merger combines default public STUN servers with deployment-level TURN relays (`velo-config.template.js`) and user-supplied `localStorage` TURN servers without clobbering.
-- **Ephemeral TURN Credential Support**: Optional hook (`fetchEphemeralTurnCredentials`) enables integration with dynamic short-lived token services (e.g. Cloudflare Calls, Twilio Network Traversal, custom API endpoints).
-- **PeerJS Generation Safety**: PeerJS initialization cycles track epoch generation tokens (`peerGeneration`). Callbacks from old or orphaned peer instances are discarded, preventing stale listener leaks.
-- **Safe Network Reconfiguration**: Network settings cannot be altered during active transfers. Applying new ICE servers safely tears down previous peer instances before reconnecting.
-- **Queue Deadlock Elimination & DoS Limits**: Strict `try...catch...finally` execution safeguards queue processing against unhandled FileReader or peer aborts. Hard protocol limits (`MAX_QUEUED_FILES = 50`, `MAX_CONCURRENT_RECEIVES = 3`) defend against resource exhaustion.
-- **100% XSS Hardened**: All dynamic remote data (usernames, filenames, text snippets) is rendered via DOM creation and `.textContent`. Unsafe `innerHTML` interpolation of untrusted input is completely eliminated.
-- **Dynamic Origin Links**: Share URLs and QR codes resolve dynamically using `window.location.origin` for seamless local, staging, and production deployments.
+- **Binary Framed Chunking**: 44-byte header (`VL` magic + version + 36-byte UUID + Uint32 sequence + payload). Chunks are sized 64–256KB to stay under the browser SCTP message limit (~256KB) and sent with PeerJS serialization `raw` — no binary-pack re-encoding, straight to the DataChannel.
+- **Streaming SHA-256 Integrity**: Vendored incremental SHA-256 (FIPS 180-4, verified against Node `crypto`) hashes chunk-by-chunk on both sender and receiver — the file is never materialized as one giant ArrayBuffer. Receivers verify chunk count, byte length, and digest before download. **Note: SHA-256 detects corruption/tampering of data in transit; it does not authenticate who the sender is.**
+- **Disk Streaming (OPFS)**: When the browser supports the File System Access API, incoming files stream directly to OPFS storage — the receive path is memory-bounded regardless of file size. An in-memory chunk fallback is used elsewhere, with a device-aware capacity budget.
+- **Event-Driven Flow Control**: Per-peer outbound queues drained by `dataChannel.bufferedamountlow` events; slice prefetch overlaps disk reads with network sends; one slow peer never throttles a broadcast.
+- **Consent & Abuse Controls**: Incoming files and text require explicit accept/decline before any data flows. Per-peer block/unblock, protocol-message rate limiting (including speed-test pings), inbound connection caps.
+- **Strict Metadata Validation**: `file-start` headers are validated against a strict schema (RFC 4122 **v4** UUID with version/variant enforced, real-number numeric fields — no string coercion, exact `totalChunks`, mandatory 64-hex sha256).
+- **Exact Chunk Bounds**: Each chunk must be exactly `min(chunkSize, size − seq·chunkSize)` bytes; cumulative over-delivery aborts the transfer.
+- **Composite Transfer Ownership**: Receiver transfers keyed `${peerId}:${transferId}`; chunks and control messages from mismatching peers are rejected.
+- **Receiver State Machine**: `awaiting-consent → receiving → verifying → completed/failed`; late/duplicate `file-end`, chunks after exit, and spurious ACKs are ignored as protocol errors.
+- **CSPRNG Identifiers**: Peer IDs (`VELO-` + 10 chars, ~50 bits) and UUIDs use `crypto.getRandomValues`. Peer IDs are routing addresses, not authorization.
+- **100% XSS Hardened**: All dynamic remote data rendered via DOM construction and `.textContent`. The only `innerHTML` uses are static, hard-coded icon markup that never contains remote data.
+- **SVG Icon System**: No emoji glyphs; all icons are inline SVG (XSS-safe `createElementNS` construction).
 
 ---
 
-## 🌐 NAT Traversal & The "One Friend Cannot Connect" Problem
+## 🌐 NAT Traversal & TURN
 
-### Why STUN Fails for Certain Users
-WebRTC establishes direct peer-to-peer connections using ICE (Interactive Connectivity Establishment). STUN (Session Traversal Utilities for NAT) works by asking an external server to reflect back the user's public IP and port.
-
-However, STUN **cannot** connect two peers when either peer is behind:
-1. **Symmetric NAT**: The router assigns a *different* external mapping port for every destination address/port requested.
-2. **Carrier-Grade NAT (CGNAT)**: Typical on 4G/5G mobile cellular connections, where thousands of subscribers share external IPs.
-3. **Enterprise & Campus Firewalls**: Strict firewalls that block outbound UDP traffic or filter non-whitelisted ports.
-
-When one friend is on mobile data or behind a symmetric router, direct UDP hole punching fails with ICE state `disconnected` or `failed`. **A TURN (Traversal Using Relays around NAT) server is mathematically mandatory** in these topologies to relay encrypted traffic over standard ports (UDP 3478, TCP 443, or TLS 5349).
-
----
-
-## 🛠️ TURN Server Deployment & Configuration
-
-Velo supports three methods of configuring TURN relays:
+STUN cannot connect peers behind symmetric NAT, CGNAT (4G/5G), or strict firewalls — a TURN relay is mandatory there. Velo supports three configuration methods:
 
 ### 1. In-App Network Settings (Zero Code)
-Users can input their own TURN credentials directly in the app:
-1. Click the **⚙️ Network** button in the header or landing page.
-2. Paste your TURN credentials as a JSON array:
-```json
-[
-  {
-    "urls": ["turn:turn.example.com:3478", "turns:turn.example.com:5349"],
-    "username": "velo_user",
-    "credential": "secure_password"
-  }
-]
-```
-3. Click **Save & Apply**. Credentials are saved in `localStorage` and merged with default STUN servers on every session.
+Click **Network** in the header, paste your TURN credentials as a JSON array, and click Save & Apply. Note: applying new settings **issues you a new Peer ID** (you are warned and must confirm).
 
-### 2. Domain Deployment Configuration (`public/js/config.js`)
-For administrators deploying Velo on a domain:
-Copy `public/js/velo-config.template.js` to `public/js/config.js` or define `window.VELO_CONFIG`:
+### 2. Deployment Config (`public/js/velo-config.js`)
+Copy `public/js/velo-config.template.js` to `public/js/velo-config.js` (this file is **git-ignored** — never commit credentials) and set `window.VELO_CONFIG`:
+
 ```javascript
 window.VELO_CONFIG = {
-    iceServers: [
-        {
-            urls: [
-                'turn:turn.yourdomain.com:3478?transport=udp',
-                'turn:turn.yourdomain.com:3478?transport=tcp',
-                'turns:turn.yourdomain.com:5349?transport=tcp'
-            ],
-            username: 'production_user',
-            credential: 'production_password'
-        }
-    ],
-    // Optional: Dynamic ephemeral token endpoint
-    // ephemeralTurnEndpoint: 'https://api.yourdomain.com/v1/turn-credentials'
+    // Option A: ephemeral TURN credential endpoint (JSON { iceServers: [...] })
+    turnTokenEndpoint: '/api/turn-credentials',
+    // Option B: static TURN servers
+    iceServers: [{ urls: ['turn:turn.yourdomain.com:3478'], username: 'u', credential: 'p' }],
+    // Option C: self-hosted PeerJS signaling server
+    peerServer: { host: 'signal.yourdomain.com', port: 443, path: '/velo', secure: true }
 };
 ```
 
-### 3. Setting Up Self-Hosted Coturn (Ubuntu / Debian)
-To run your own high-speed TURN server:
+`velo-config.js` is loaded **before** `config.js` in `app.html`. Ephemeral credentials are fetched asynchronously during peer startup (`getIceConfigAsync`). If you don't create the file you'll see a harmless 404 for it in the console.
+
+### 3. Self-Hosted Coturn (Ubuntu / Debian)
 ```bash
 sudo apt update && sudo apt install coturn -y
-sudo nano /etc/turnserver.conf
 ```
-Add the following production configuration:
+`/etc/turnserver.conf`:
 ```ini
 listening-port=3478
 tls-listening-port=5349
 listening-ip=0.0.0.0
-
-# Domain & Realm
 realm=turn.yourdomain.com
-server-name=turn.yourdomain.com
-
-# Long-term authentication
 lt-cred-mech
 user=velo_user:secure_password_here
-
-# TLS certificates (e.g. Let's Encrypt)
 cert=/etc/letsencrypt/live/turn.yourdomain.com/fullchain.pem
 pkey=/etc/letsencrypt/live/turn.yourdomain.com/privkey.pem
-
-# Security & Fingerprinting
 fingerprint
 no-cli
 no-loopback-peers
 no-multicast-peers
 ```
-Restart and enable the service:
-```bash
-sudo systemctl restart coturn
-sudo systemctl enable coturn
-```
+Open UDP 3478 and TCP 5349 in your firewall.
 
-Ensure UDP port 3478 and TCP port 5349 are open in your cloud firewall (e.g. AWS Security Groups, UFW).
+### Self-Hosted PeerJS Signaling
+To stop using the public PeerJS cloud (`0.peerjs.com`), run [peerjs-server](https://github.com/peers/peerjs-server) and set `peerServer` in `velo-config.js` (see above).
 
 ---
 
@@ -121,83 +76,32 @@ Ensure UDP port 3478 and TCP port 5349 are open in your cloud firewall (e.g. AWS
 
 | Vector | Mitigation |
 | :--- | :--- |
-| **Tampered / Corrupt File** | SHA-256 computed on sender, recomputed on reconstructed Blob by receiver. Fails closed (download aborted, error sent) on mismatch or crypto throw. |
-| **Packet Interleaving** | 44-byte binary framing header per chunk (`VL` magic + UUID + seq) enforces deterministic indexed assembly. |
-| **Spoofed Chunks / Cross-Peer Injection** | Transfers tracked by composite key `${peerId}:${transferId}`. Chunks from mismatching peers are rejected immediately. |
-| **Denial of Service (Memory Exhaustion)** | Hard 2GB file limit (`ProtocolConstants.MAX_FILE_SIZE`). Max 50 queued files (`MAX_QUEUED_FILES`). Max 3 concurrent receives per peer (`MAX_CONCURRENT_RECEIVES`). Chunks array freed immediately upon Blob creation. |
-| **XSS / HTML Injection** | 100% DOM element construction with `.textContent`. Sanitization passes on filenames (`sanitizeFilename`) and text snippets (`sanitizeText`). |
-| **Queue Starvation / Deadlock** | Top-level `try...finally` wrappers on `sendFile` and reader error/abort hooks ensure `isSending` lock is always released. |
+| Corrupt/tampered file | Streaming SHA-256, fail-closed on mismatch or crypto error (download aborted, sender notified). Detects corruption; not sender authentication. |
+| Oversized/mis-sized chunks | Exact per-chunk length check + cumulative byte ceiling; violations abort the transfer. |
+| Cross-peer injection | Composite `${peerId}:${transferId}` keys; origin peer verified on every message. |
+| Protocol violations | Spurious ACK (before file-end / non-'ok'), duplicate file-end, chunks after state exit → peer marked failed / transfer aborted. |
+| DoS / floods | Rate limits per peer (control/chunk/ping buckets), inbound connection rate cap, per-peer + global receive caps, aggregate receive capacity, consent prompts, per-peer block list. |
+| XSS | 100% `.textContent`/DOM construction for remote data. |
+| Stalled transfers | 30s no-progress receive idle timeout; consent and accept timeouts. |
 
 ---
 
 ## 📦 Running Locally & Testing
 
-### Prerequisites
-* Node.js v18+
-* npm v9+
-
-### Quick Start
 ```bash
-# Clone the repository
 git clone https://github.com/prathamtagad/velo-share.git
 cd velo-share
-
-# Install dependencies
-npm install
-
-# Run automated verification test suite
-npm test
-
-# Start local server
-npm start
+npm install        # installs the pinned `serve` devDependency
+npm test           # automated test suite (mock DOM + mock conns)
+npm run benchmark  # protocol performance benchmark
+npm start          # serve public/ at http://localhost:3000
 ```
-Open `http://localhost:3000` in your browser.
-
----
 
 ## 🧪 Automated Verification Suite
 
-Run the full protocol, security, and integrity test suite:
-```bash
-npm test
-```
+`npm test` runs an async runner that drives **real VeloApp methods** against a minimal mock DOM and mock PeerJS connections, covering protocol framing, strict metadata validation, incremental SHA-256, the consent flow, sender cancel mid-transfer, receiver state machine, rate limiting, text-share semantics (never delivered to later peers; one-time expiring link tokens), Unicode usernames, control-character filenames, SCTP-safe chunk sizing, and more. Run it to see the full list; the suite exits non-zero on any failure.
 
-The test suite validates 21 automated assertions across:
-1. Binary chunk framing & unpack header roundtrip (UUID, seq, binary payload).
-2. Truncated and corrupted binary header rejection.
-3. Out-of-order chunk reconstruction into exact indexed order.
-4. Missing chunk detection prior to file finalization.
-5. Broadcast target selection (`selected` mode with 0 peers safely returns empty list).
-6. Deterministic tie-breaking for simultaneous cross-connections.
-7. UUID v4 uniqueness and formatting.
-8. Peer ID generation format (`VELO-XXXXXX`).
-9. Directory traversal (`../../`) and XSS filename sanitization.
-10. Text sharing length bounding.
-11. Strict metadata validation (`validateFileStartMetadata`) on valid input.
-12. Rejection of invalid UUIDs, negative/NaN sizes, size limit overflows, and totalChunk mismatches.
-13. Adaptive ACK timeout scaling across file sizes [30s..300s].
-14. ICE server multi-tier merging and duplicate URL deduplication.
-15. ICE server object schema and scheme validation (`stun:`, `turn:`, `turns:`).
-16. Composite transfer ownership isolation (`${peerId}:${transferId}`).
-17. Protocol limits (`MAX_QUEUED_FILES`, `MAX_CONCURRENT_RECEIVES`, ACK timeouts).
-18. Speed test collision guards (inbound headers ignored during active outbound tests).
-19. WebCrypto SHA-256 match against standard Node.js `crypto`.
-20. Tampered data detection via SHA-256 mismatch.
-21. Fail-closed receiver verification behavior (abort transfer without triggering download).
-
----
-
-## 📊 Verification & Production Readiness Matrix
-
-| Area | Status | Verification Detail |
-| :--- | :--- | :--- |
-| **Binary Protocol & Framing** | ✅ VERIFIED | Automated test suite passes roundtrip framing, seq indexing, magic bytes, corrupted header rejection. |
-| **SHA-256 Integrity Verification** | ✅ VERIFIED | Verified against Node `crypto.createHash('sha256')`. Fail-closed rejection verified. |
-| **Strict Metadata Validation** | ✅ VERIFIED | Schema validated against bad UUIDs, negative sizes, >2GB limits, and chunk mismatches. |
-| **Queue Management & Deadlocks** | ✅ VERIFIED | Verified `isSending` lock release on FileReader error, abort, peer failure, and unexpected exception. |
-| **XSS Hardening** | ✅ VERIFIED | Zero `innerHTML` usage with untrusted input across codebase. Text nodes enforced. |
-| **ICE Server Merging & Parsing** | ✅ VERIFIED | Validated deduplication, credential verification, and non-clobbering merge logic. |
-| **TURN Traversal (Local / Sim)** | ⚠️ CONFIGURATION VERIFIED | Merging and credential parsing tested. *Note: Live cross-NAT relay requires external Coturn or managed TURN instance.* |
+Two-browser live transfer (the real WebRTC path) is best verified manually: open `http://localhost:3000` in two browser profiles and send a file.
 
 ---
 
@@ -205,33 +109,30 @@ The test suite validates 21 automated assertions across:
 
 ```
 ├── public/
-│   ├── index.html                 # Marketing landing page
-│   ├── app.html                   # Main P2P application workspace
-│   ├── about.html                 # Project overview
-│   ├── privacy.html               # Privacy policy
-│   ├── terms.html                 # Terms of service
-│   ├── manifest.json              # PWA manifest
-│   ├── sw.js                      # Service Worker (offline cache v3)
-│   ├── css/
-│   │   └── style.css              # Core styles & design tokens
+│   ├── index.html, app.html, about.html, privacy.html, terms.html
+│   ├── manifest.json              # PWA manifest (real PNG icons, relative paths)
+│   ├── sw.js                      # Service Worker (scope-relative, versioned cache v5)
+│   ├── _headers                   # Netlify security headers (CSP etc.)
+│   ├── icons/                     # real 192/512 PNGs + maskable variants
+│   ├── vendor/                    # self-hosted PeerJS + qrcodejs (SRI-pinned)
 │   └── js/
-│       ├── config.js              # Multi-tier ICE server merger & validator
-│       ├── velo-config.template.js# Production deployment TURN configuration template
-│       ├── theme.js               # Light/Dark mode state
-│       └── velo-app.js            # Core WebRTC P2P engine & protocol logic
-├── test/
-│   └── test-suite.js              # Automated unit & protocol verification suite
-├── package.json                   # Scripts & project metadata
-└── README.md                      # Production technical documentation
+│       ├── velo-config.template.js# deployment config template (copy to velo-config.js)
+│       ├── config.js              # ICE merger/validator + async ephemeral TURN fetch
+│       ├── theme.js, velo-app.js
+├── scripts/
+│   ├── benchmark.js               # protocol performance benchmark
+│   └── generate-icons.js          # regenerates the PNG icons
+└── test/test-suite.js             # automated verification suite
 ```
 
 ---
 
 ## ⚠️ Operational Constraints
 
-* **Maximum In-Memory File Size**: ~2GB per file in modern 64-bit browsers due to browser ArrayBuffer and Blob memory limits.
-* **Signaling Service**: WebRTC connection establishment uses PeerJS signaling (`0.peerjs.com`). Once data channels are open, transfers continue directly peer-to-peer even if signaling temporarily disconnects.
-* **Symmetric NATs / CGNAT**: Direct STUN connection between two symmetric NATs or restrictive mobile cellular networks is impossible without a TURN relay. Always configure a TURN server for public production deployments.
+* **Max file size**: 2GB protocol ceiling. With OPFS streaming (Chrome/Edge desktop) receives are disk-bound, so large files don't hit RAM limits; the in-memory fallback applies a device-aware budget (256MB–1GB aggregate) and rejects beyond it with a clear message. Live 2GB end-to-end transfers have **not** been verified by the authors — treat 2GB as a protocol ceiling, not a tested guarantee.
+* **Signaling**: Uses the public PeerJS cloud by default; self-host via `peerServer` for production.
+* **Protocol version**: Wire protocol v2 — both peers must run this version.
+* **Symmetric NAT / CGNAT** requires TURN; configure it for production deployments.
 
 ---
 

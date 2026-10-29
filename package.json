@@ -4,8 +4,8 @@
   "description": "Velo - Production-Grade P2P File Transfer with WebRTC, STUN/TURN, and SHA-256 Integrity Verification.",
   "private": true,
   "scripts": {
-    "dev": "serve public",
-    "start": "serve public",
+    "dev": "npx serve public",
+    "start": "npx serve public",
     "test": "node test/test-suite.js",
     "benchmark": "node scripts/benchmark.js",
     "icons": "node scripts/generate-icons.js"

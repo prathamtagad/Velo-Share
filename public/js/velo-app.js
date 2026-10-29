@@ -33,10 +33,12 @@ const ProtocolConstants = {
     HEADER_SIZE: 44, // 2 (magic) + 1 (ver) + 1 (uuidLen) + 36 (uuid) + 4 (seq Uint32)
     MAX_FILE_SIZE: 2 * 1024 * 1024 * 1024, // 2GB protocol ceiling (see README for per-mode limits)
     // Chunk sizes must keep header+payload under the SCTP message limit
-    // (Chrome/Edge: 262144 bytes). 44-byte header + headroom => 262080 max.
-    DEFAULT_CHUNK_SIZE: 256 * 1024 - 64, // ~256KB
+    // (Chrome/Edge: 262144 bytes). 44-byte header + 256-byte shim headroom =>
+    // max safe payload = 262144 - 44 - 256 = 261844. We round down to a clean
+    // 256-byte-aligned value: 256*1024 - 256 = 261888.
+    DEFAULT_CHUNK_SIZE: 256 * 1024 - 256, // 261888 bytes payload → 261932 framed (SCTP-safe)
     MIN_CHUNK_SIZE: 64 * 1024, // 64KB
-    MAX_CHUNK_SIZE: 256 * 1024 - 64, // ~256KB (SCTP-safe)
+    MAX_CHUNK_SIZE: 256 * 1024 - 256, // 261888 bytes (SCTP-safe)
     BACKPRESSURE_HIGH_WATERMARK: 1024 * 1024, // 1MB
     BACKPRESSURE_LOW_WATERMARK: 256 * 1024, // 256KB
     CONNECTION_TIMEOUT_MS: 15000,
