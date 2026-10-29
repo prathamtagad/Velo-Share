@@ -32,11 +32,11 @@ const ProtocolConstants = {
     UUID_LENGTH: 36,
     HEADER_SIZE: 44, // 2 (magic) + 1 (ver) + 1 (uuidLen) + 36 (uuid) + 4 (seq Uint32)
     MAX_FILE_SIZE: 2 * 1024 * 1024 * 1024, // 2GB protocol ceiling (see README for per-mode limits)
-    // Chunk sizes kept <= 256KB: with serialization 'raw' chunks go straight
-    // to RTCDataChannel.send(), which must stay under SCTP message limits.
-    DEFAULT_CHUNK_SIZE: 256 * 1024, // 256KB
+    // Chunk sizes must keep header+payload under the SCTP message limit
+    // (Chrome/Edge: 262144 bytes). 44-byte header + headroom => 262080 max.
+    DEFAULT_CHUNK_SIZE: 256 * 1024 - 64, // ~256KB
     MIN_CHUNK_SIZE: 64 * 1024, // 64KB
-    MAX_CHUNK_SIZE: 256 * 1024, // 256KB
+    MAX_CHUNK_SIZE: 256 * 1024 - 64, // ~256KB (SCTP-safe)
     BACKPRESSURE_HIGH_WATERMARK: 1024 * 1024, // 1MB
     BACKPRESSURE_LOW_WATERMARK: 256 * 1024, // 256KB
     CONNECTION_TIMEOUT_MS: 15000,
@@ -495,6 +495,62 @@ function sanitizeText(text) {
     return text.slice(0, ProtocolConstants.MAX_TEXT_SHARE_CHARS);
 }
 
+// ==================== SVG ICON SYSTEM ====================
+// Inline SVG icons built via createElementNS (XSS-safe, no emoji, no
+// external icon fonts). Stroke inherits `currentColor`.
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+const ICON_PATHS = {
+    check: '<path d="M20 6L9 17l-5-5"/>',
+    x: '<path d="M18 6L6 18M6 6l12 12"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 12v5"/>',
+    warning: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18h.01"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+    pause: '<rect x="6" y="4" width="4" height="16" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" fill="currentColor" stroke="none"/>',
+    play: '<path d="M7 4l13 8-13 8V4z" fill="currentColor" stroke="none"/>',
+    trash: '<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+    bolt: '<path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="currentColor" stroke="none"/>',
+    block: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+    settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h13M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+    clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+    broadcast: '<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 19.1a10 10 0 0 1 0-14.2M19.1 4.9a10 10 0 0 1 0 14.2"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>'
+};
+
+/**
+ * Builds an inline SVG icon element. Returns an SVGSVGElement with
+ * stroke="currentColor" so CSS color cascades naturally.
+ */
+function makeIcon(name, size = 16, strokeWidth = 2) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', size);
+    svg.setAttribute('height', size);
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', strokeWidth);
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.verticalAlign = 'middle';
+    svg.style.flexShrink = '0';
+
+    const markup = ICON_PATHS[name] || ICON_PATHS.info;
+    // Trusted, hard-coded icon markup only — never remote data
+    const holder = document.createElement('span');
+    holder.innerHTML = `<svg xmlns="${SVG_NS}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${markup}</svg>`;
+    const inner = holder.firstElementChild;
+    if (inner) {
+        while (inner.firstChild) {
+            svg.appendChild(inner.firstChild);
+        }
+    }
+    return svg;
+}
+
 // ==================== LOGGER & OBSERVABILITY ====================
 
 class VeloLogger {
@@ -606,9 +662,11 @@ class VeloApp {
         this.bindEvents();
         this.initNewFeatures();
 
-        // Expose debug instance on window
-        window.velo = this;
-        window.veloDiagnostics = () => this.getDiagnostics();
+        // Expose debug instance on window (browser only; Node test env has no window)
+        if (typeof window !== 'undefined') {
+            window.velo = this;
+            window.veloDiagnostics = () => this.getDiagnostics();
+        }
     }
 
     // ==================== UI INITIALIZATION ====================
@@ -723,14 +781,19 @@ class VeloApp {
         // Queue Controls. Pause means: the CURRENT transfer keeps running, but
         // the next queued file will not start until resumed.
         if (this.pauseQueueBtn) {
+            const setPauseIcon = (name) => {
+                this.pauseQueueBtn.textContent = '';
+                this.pauseQueueBtn.appendChild(makeIcon(name, 16, 2));
+            };
+            setPauseIcon('pause');
             this.pauseQueueBtn.addEventListener('click', () => {
                 if (this.isPaused) {
                     this.resumeQueue();
-                    this.pauseQueueBtn.textContent = '⏸️';
+                    setPauseIcon('pause');
                     this.pauseQueueBtn.title = 'Hold queue: finish current file, don\'t start the next';
                 } else {
                     this.pauseQueue();
-                    this.pauseQueueBtn.textContent = '▶️';
+                    setPauseIcon('play');
                     this.pauseQueueBtn.title = 'Resume queue';
                 }
             });
@@ -761,9 +824,9 @@ class VeloApp {
     }
 
     initNewFeatures() {
-        // Register Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
+        // Register Service Worker (scope-relative so subpath deploys work)
+        if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
                 .then(reg => logger.log('Service Worker registered:', reg.scope))
                 .catch(err => logger.warn('Service Worker registration failed:', err));
         }
@@ -774,6 +837,7 @@ class VeloApp {
     }
 
     checkUrlParams() {
+        if (typeof window === 'undefined') return;
         const params = new URLSearchParams(window.location.search);
         const joinId = params.get('join');
         const textShareToken = params.get('t');
@@ -2339,14 +2403,17 @@ class VeloApp {
             return;
         }
 
-        // Aggregate buffered-bytes cap across ALL active receives
+        // Aggregate buffered-bytes cap across ALL active receives.
+        // Capacity is device-aware: with OPFS disk streaming the RAM ceiling
+        // disappears (bounded by the protocol ceiling instead).
+        const capacity = this.getReceiveCapacityBytes();
         let aggregateBytes = 0;
         for (const r of this.activeReceives.values()) {
             aggregateBytes += Math.max(0, r.size - r.receivedBytes);
         }
-        if (aggregateBytes + size > ProtocolConstants.MAX_AGGREGATE_RECEIVE_BUFFER) {
-            logger.warn(`Rejecting transfer ${transferId} from ${peerId}: aggregate receive buffer cap reached`);
-            reject('Incoming transfer buffer limit reached. Try again after current transfers finish.');
+        if (aggregateBytes + size > capacity) {
+            logger.warn(`Rejecting transfer ${transferId} from ${peerId}: receive capacity ${capacity} exceeded`);
+            reject('Incoming transfer exceeds this device\'s current capacity. Try again after current transfers finish.');
             return;
         }
 
@@ -2380,6 +2447,68 @@ class VeloApp {
 
         this.activeReceives.set(compositeKey, receiveRecord);
         this.showFileConsentPrompt(compositeKey, receiveRecord);
+    }
+
+    /**
+     * Device-aware receive capacity in bytes.
+     * - OPFS available: transfers stream to disk, so the RAM ceiling is gone
+     *   and the limit is the protocol ceiling (2GB).
+     * - In-memory fallback: budget scales with the device (navigator.deviceMemory
+     *   / JS heap limit) instead of a fixed constant.
+     */
+    getReceiveCapacityBytes() {
+        let opfsAvailable = false;
+        try {
+            opfsAvailable = typeof FileSystemFileHandle !== 'undefined' &&
+                typeof FileSystemFileHandle.prototype.createWritable === 'function';
+        } catch (e) {}
+        if (opfsAvailable) {
+            return ProtocolConstants.MAX_FILE_SIZE; // disk-streamed: no RAM ceiling
+        }
+
+        let budget = ProtocolConstants.MAX_AGGREGATE_RECEIVE_BUFFER; // conservative default
+        try {
+            if (typeof navigator !== 'undefined' && navigator.deviceMemory) {
+                // ~1/8 of device RAM, clamped to [256MB, 1GB]
+                budget = Math.max(256 * 1024 * 1024,
+                    Math.min(1024 * 1024 * 1024, navigator.deviceMemory / 8 * 1024 * 1024 * 1024));
+            }
+            if (typeof performance !== 'undefined' && performance.memory && performance.memory.jsHeapSizeLimit) {
+                budget = Math.min(budget, Math.max(256 * 1024 * 1024, performance.memory.jsHeapSizeLimit / 4));
+            }
+        } catch (e) {}
+        return budget;
+    }
+
+    /**
+     * Sends text to the CURRENT target set only — fire-and-forget, never
+     * retained for peers that connect later. Returns the number of peers
+     * successfully contacted (0 means nothing was delivered).
+     */
+    sendTextToTargets(rawText) {
+        const safe = sanitizeText(rawText);
+        const targets = this.getTargetConnections();
+
+        if (targets.length === 0) {
+            this.showToast('No peers selected. Select at least one peer or choose "Send to All".', 'error');
+            return 0;
+        }
+
+        let delivered = 0;
+        targets.forEach(({ conn }) => {
+            try {
+                conn.send({ type: 'text-share', text: safe });
+                delivered++;
+            } catch (e) {}
+        });
+
+        if (delivered === 0) {
+            this.showToast('Failed to send text: no peer could be contacted.', 'error');
+            return 0;
+        }
+
+        this.showToast(`Text sent to ${delivered} peer(s).`, 'success');
+        return delivered;
     }
 
     // ==================== INCOMING TRANSFER CONSENT (ABUSE CONTROL) ====================
@@ -3106,7 +3235,10 @@ class VeloApp {
         //    (data out + result back) on its own clock. No timestamps from the
         //    remote machine are subtracted, so clock skew cannot corrupt the
         //    result. The UI labels this as a round-trip estimate.
+        //    The payload is split into SCTP-safe messages (serialization
+        //    'raw' does no chunking; single sends must stay <= 256KB).
         const testDataSize = 1024 * 1024; // 1MB
+        const testMessageSize = 64 * 1024; // 64KB per dc.send()
         const testData = new Uint8Array(testDataSize);
         crypto.getRandomValues(testData.subarray(0, 1024)); // Seed partial
 
@@ -3115,7 +3247,11 @@ class VeloApp {
             testEntry.uploadResolve = resolve;
             try {
                 conn.send({ type: 'speed-test-data', testId, size: testDataSize, timestamp: uploadStart });
-                conn.send(testData.buffer);
+                for (let off = 0; off < testDataSize; off += testMessageSize) {
+                    // Send the Uint8Array view (not .buffer — that would ship
+                    // the whole 1MB backing buffer and trip the SCTP limit)
+                    conn.send(testData.subarray(off, Math.min(off + testMessageSize, testDataSize)));
+                }
             } catch (e) {
                 resolve({ error: true });
             }
@@ -3172,28 +3308,43 @@ class VeloApp {
             logger.warn(`Speed test conflict on ${peerId}: ignoring incoming header while outbound test active`);
             return;
         }
+        const expected = typeof data.size === 'number' && data.size > 0 ? data.size : null;
         if (!testEntry) {
-            testEntry = { testId: data.testId, expectingTestData: true, timestamp: data.timestamp, headerAt: Date.now() };
+            testEntry = {
+                testId: data.testId,
+                expectingTestData: true,
+                timestamp: data.timestamp,
+                headerAt: Date.now(),
+                expectedBytes: expected,
+                receivedTestBytes: 0
+            };
             this.activeSpeedTests.set(peerId, testEntry);
         } else {
             testEntry.expectingTestData = true;
             testEntry.timestamp = data.timestamp;
             testEntry.testId = data.testId;
             testEntry.headerAt = Date.now();
+            testEntry.expectedBytes = expected;
+            testEntry.receivedTestBytes = 0;
         }
     }
 
     handleSpeedTestDataReceived(peerId, data) {
         const testEntry = this.activeSpeedTests.get(peerId);
         if (!testEntry || !testEntry.expectingTestData) return;
-        if (data && data.testId && testEntry.testId && data.testId !== testEntry.testId) {
-            logger.warn(`Speed test data ID mismatch for ${peerId}: expected ${testEntry.testId}, got ${data.testId}`);
-            return;
+
+        // The payload arrives as multiple SCTP-sized messages; accumulate
+        // until the advertised size is reached before replying.
+        const bytes = data && typeof data.byteLength === 'number' ? data.byteLength : 0;
+        testEntry.receivedTestBytes = (testEntry.receivedTestBytes || 0) + bytes;
+
+        if (testEntry.expectedBytes && testEntry.receivedTestBytes < testEntry.expectedBytes) {
+            return; // more messages still incoming
         }
 
         testEntry.expectingTestData = false;
-        // Receiver-local interval between the control header and the binary
-        // payload - measured on this machine's clock only.
+        // Receiver-local interval between the control header and the LAST
+        // binary message — measured on this machine's clock only.
         const localIntervalMs = testEntry.headerAt ? Date.now() - testEntry.headerAt : null;
         const conn = this.connections.get(peerId)?.conn;
         if (conn) {
@@ -3489,10 +3640,10 @@ class VeloApp {
             // Speed test button
             const speedBtn = document.createElement('button');
             speedBtn.className = 'speed-test-btn';
-            speedBtn.style.cssText = 'background: var(--bg-main); border: none; padding: 0.3rem 0.5rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.75rem;';
+            speedBtn.style.cssText = 'background: var(--bg-main); border: none; padding: 0.35rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); display: flex; align-items: center;';
             speedBtn.title = 'Test Connection Speed';
             speedBtn.setAttribute('aria-label', `Test connection speed to ${peerInfo.username}`);
-            speedBtn.textContent = '⚡';
+            speedBtn.appendChild(makeIcon('bolt', 14, 2));
             speedBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.runSpeedTest(peerId);
@@ -3501,10 +3652,10 @@ class VeloApp {
 
             // Block/disconnect button (abuse control)
             const blockBtn = document.createElement('button');
-            blockBtn.style.cssText = 'background: var(--bg-main); border: none; padding: 0.3rem 0.5rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 0.75rem;';
+            blockBtn.style.cssText = 'background: var(--bg-main); border: none; padding: 0.35rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); display: flex; align-items: center;';
             blockBtn.title = 'Block this peer';
             blockBtn.setAttribute('aria-label', `Block ${peerInfo.username}`);
-            blockBtn.textContent = '⛔';
+            blockBtn.appendChild(makeIcon('block', 14, 2));
             blockBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.blockPeer(peerId);
@@ -3523,8 +3674,9 @@ class VeloApp {
             togglePill.setAttribute('tabindex', '0');
 
             const toggleSpan = document.createElement('span');
-            toggleSpan.style.cssText = 'font-size: 0.8rem; color: var(--text-muted);';
-            toggleSpan.textContent = this.broadcastMode === 'all' ? '📡 Send to All' : '🎯 Send to Selected';
+            toggleSpan.style.cssText = 'font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.35rem;';
+            toggleSpan.appendChild(makeIcon(this.broadcastMode === 'all' ? 'broadcast' : 'target', 13, 2));
+            toggleSpan.appendChild(document.createTextNode(this.broadcastMode === 'all' ? 'Send to All' : 'Send to Selected'));
             togglePill.appendChild(toggleSpan);
 
             const toggle = () => this.setBroadcastMode(this.broadcastMode === 'all' ? 'selected' : 'all');
@@ -3552,8 +3704,8 @@ class VeloApp {
 
         // Icon Container
         const iconDiv = document.createElement('div');
-        iconDiv.style.cssText = `color: ${iconColor}; background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 8px;`;
-        iconDiv.textContent = direction === 'receive' ? '📥' : '📤';
+        iconDiv.style.cssText = `color: ${iconColor}; background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 8px; display: flex; align-items: center;`;
+        iconDiv.appendChild(makeIcon(direction === 'receive' ? 'download' : 'upload', 20, 2));
         card.appendChild(iconDiv);
 
         // Info Container
@@ -3600,9 +3752,10 @@ class VeloApp {
 
         // Cancel Button
         const cancelBtn = document.createElement('button');
-        cancelBtn.style.cssText = 'background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0.3rem; margin-left: 0.5rem;';
+        cancelBtn.style.cssText = 'background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0.3rem; margin-left: 0.5rem; display: flex; align-items: center;';
         cancelBtn.title = 'Cancel Transfer';
-        cancelBtn.textContent = '✕';
+        cancelBtn.setAttribute('aria-label', 'Cancel Transfer');
+        cancelBtn.appendChild(makeIcon('x', 14, 2.4));
         cancelBtn.onclick = () => this.cancelTransfer(id);
         card.appendChild(cancelBtn);
 
@@ -3637,8 +3790,14 @@ class VeloApp {
 
         if (bar) bar.style.width = '100%';
         if (percent) {
-            percent.textContent = '✓ Complete';
+            percent.textContent = '';
             percent.style.color = 'var(--accent)';
+            percent.style.display = 'flex';
+            percent.style.alignItems = 'center';
+            percent.style.justifyContent = 'flex-end';
+            percent.style.gap = '0.3rem';
+            percent.appendChild(makeIcon('check', 13, 2.6));
+            percent.appendChild(document.createTextNode('Complete'));
         }
         if (eta) eta.textContent = 'Verified';
     }
@@ -3650,8 +3809,14 @@ class VeloApp {
 
         if (bar) bar.style.background = 'var(--danger)';
         if (percent) {
-            percent.textContent = '✕ Failed';
+            percent.textContent = '';
             percent.style.color = 'var(--danger)';
+            percent.style.display = 'flex';
+            percent.style.alignItems = 'center';
+            percent.style.justifyContent = 'flex-end';
+            percent.style.gap = '0.3rem';
+            percent.appendChild(makeIcon('x', 13, 2.6));
+            percent.appendChild(document.createTextNode('Failed'));
         }
         if (eta) {
             eta.textContent = reason || 'Error';
@@ -3667,10 +3832,11 @@ class VeloApp {
     showToast(message, type = 'info') {
         if (!this.toastContainer) return;
 
-        const icons = { success: '✓', error: '✕', info: 'ℹ' };
+        const icons = { success: 'check', error: 'x', info: 'info', warning: 'warning' };
         const colors = {
             success: 'var(--accent)',
             error: 'var(--danger)',
+            warning: '#f59e0b',
             info: 'var(--primary)'
         };
 
@@ -3689,9 +3855,8 @@ class VeloApp {
         `;
 
         const iconSpan = document.createElement('span');
-        iconSpan.style.color = colors[type] || colors.info;
-        iconSpan.style.fontWeight = 'bold';
-        iconSpan.textContent = icons[type] || 'ℹ';
+        iconSpan.style.cssText = `color: ${colors[type] || colors.info}; display: flex; align-items: center;`;
+        iconSpan.appendChild(makeIcon(icons[type] || 'info', 16, 2.4));
         toast.appendChild(iconSpan);
 
         const textSpan = document.createElement('span');
@@ -3872,32 +4037,10 @@ class VeloApp {
                 this.showToast('Enter some text to share', 'error');
                 return;
             }
-
-            const safe = sanitizeText(raw);
-            const targets = this.getTargetConnections();
-
-            // Zero targets is an error, never a silent no-op
-            if (targets.length === 0) {
-                this.showToast('No peers selected. Select at least one peer or choose "Send to All".', 'error');
-                return;
+            // Zero targets or failed delivery is an error, never a silent no-op
+            if (this.sendTextToTargets(raw) > 0) {
+                modal.remove();
             }
-
-            let delivered = 0;
-            targets.forEach(({ conn }) => {
-                try {
-                    conn.send({ type: 'text-share', text: safe });
-                    delivered++;
-                } catch (e) {}
-            });
-
-            if (delivered === 0) {
-                this.showToast('Failed to send text: no peer could be contacted.', 'error');
-                return;
-            }
-
-            // Fire-and-forget: nothing is retained for peers joining later
-            this.showToast(`Text sent to ${delivered} peer(s).`, 'success');
-            modal.remove();
         };
         card.appendChild(sendBtn);
 
@@ -4159,8 +4302,12 @@ class VeloApp {
         // Warn that applying new ICE servers re-inits the peer: the Peer ID
         // and all previously shared links change and current peers drop.
         const warn = document.createElement('p');
-        warn.style.cssText = 'color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1rem;';
-        warn.textContent = '⚠️ Applying new settings reconnects you with a NEW Peer ID. Previously shared links/QR codes stop working and connected peers are disconnected.';
+        warn.style.cssText = 'color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1rem; display: flex; align-items: flex-start; gap: 0.4rem;';
+        const warnIconSpan = document.createElement('span');
+        warnIconSpan.style.cssText = 'color: #f59e0b; display: flex; margin-top: 0.1rem;';
+        warnIconSpan.appendChild(makeIcon('warning', 14, 2.2));
+        warn.appendChild(warnIconSpan);
+        warn.appendChild(document.createTextNode('Applying new settings reconnects you with a NEW Peer ID. Previously shared links/QR codes stop working and connected peers are disconnected.'));
         card.appendChild(warn);
 
         // Buttons

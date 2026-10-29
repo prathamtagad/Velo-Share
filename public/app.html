@@ -4,12 +4,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: stun: turn: turns: https:; font-src 'self'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'">
     <title>Velo - Instant P2P Transfer</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#7C3AED">
-    <link rel="apple-touch-icon" href="icons/app-icon.svg">
-    <link rel="icon" href="icons/app-icon.svg">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     <style>
         /* ========== APP SPECIFIC STYLES ========== */
         .app-container {
@@ -378,8 +381,9 @@
                         <span class="pill">No limits</span>
                     </div>
                     <div style="margin-top: 0.75rem; display: flex; justify-content: center;">
-                        <button id="landingNetworkBtn" class="btn-ghost" style="font-size: 0.8rem; padding: 0.35rem 0.85rem; border-radius: 999px;">
-                            ⚙️ Network & TURN Settings
+                        <button id="landingNetworkBtn" class="btn-ghost" style="font-size: 0.8rem; padding: 0.35rem 0.85rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.4rem;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h13M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+                            Network &amp; TURN Settings
                         </button>
                     </div>
                 </div>
@@ -660,8 +664,9 @@
                 </div>
 
                 <div class="header-actions">
-                    <button class="btn-ghost btn-icon-text" id="copyPeerId" title="Copy Peer ID">
-                        <span>ID:</span><b id="myPeerId" style="margin: 0 0.35rem;">...</b> 📋
+                    <button class="btn-ghost btn-icon-text" id="copyPeerId" title="Copy Peer ID" style="display: inline-flex; align-items: center;">
+                        <span>ID:</span><b id="myPeerId" style="margin: 0 0.35rem;">...</b>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
                     </button>
                     <button class="btn-ghost icon-btn" id="showQrBtn" title="Show QR Code"
                         style="border-radius: 12px;">
@@ -695,12 +700,14 @@
                         <span class="desktop-only">Share Text</span>
                     </button>
                     <button class="btn-ghost" id="networkSettingsBtn" title="Network & TURN Settings"
-                        style="border-radius: 12px;">
-                        ⚙️ <span class="desktop-only">Network</span>
+                        style="border-radius: 12px; display: inline-flex; align-items: center; gap: 0.35rem;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h13M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+                        <span class="desktop-only">Network</span>
                     </button>
                     <button class="btn-ghost" id="disconnectBtn"
-                        style="color: var(--danger); border-color: var(--danger);">
-                        ✕ <span class="desktop-only">Leave</span>
+                        style="color: var(--danger); border-color: var(--danger); display: inline-flex; align-items: center; gap: 0.35rem;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+                        <span class="desktop-only">Leave</span>
                     </button>
                 </div>
             </header>
@@ -744,13 +751,13 @@
                             </div>
                         </div>
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <button id="pauseQueueBtn" class="queue-ctrl-btn" title="Pause Queue"
-                                style="background: var(--bg-main); border: none; padding: 0.45rem 0.65rem; border-radius: 10px; cursor: pointer; color: var(--text-primary); font-size: 0.9rem;">
-                                ⏸️
+                            <button id="pauseQueueBtn" class="queue-ctrl-btn" title="Hold queue: finish current file, don't start the next"
+                                style="background: var(--bg-main); border: none; padding: 0.45rem 0.65rem; border-radius: 10px; cursor: pointer; color: var(--text-primary); display: flex; align-items: center;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" fill="currentColor" stroke="none"/></svg>
                             </button>
                             <button id="clearQueueBtn" class="queue-ctrl-btn" title="Clear Queue"
-                                style="background: var(--bg-main); border: none; padding: 0.45rem 0.65rem; border-radius: 10px; cursor: pointer; color: var(--text-primary); font-size: 0.9rem;">
-                                🗑️
+                                style="background: var(--bg-main); border: none; padding: 0.45rem 0.65rem; border-radius: 10px; cursor: pointer; color: var(--text-primary); display: flex; align-items: center;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
                             </button>
                         </div>
                     </div>
@@ -800,12 +807,18 @@
             </div>
         </div>
 
-        <!-- Network Configuration -->
+        <!-- Deployment configuration (git-ignored; created from velo-config.template.js) -->
+        <script src="js/velo-config.js"></script>
+        <!-- Network Configuration (loader) -->
         <script src="js/config.js"></script>
-        <!-- PeerJS Library -->
-        <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-        <!-- QR Code Library -->
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+        <!-- PeerJS Library (self-hosted, SRI-pinned) -->
+        <script src="vendor/peerjs-1.5.2.min.js"
+            integrity="sha384-PMNj1TmCgXfW24/rfIyxYSAWwj2mffkMfguUWv08iNFcy0kTC0JN7E/tE+pJ7+fa"
+            crossorigin="anonymous"></script>
+        <!-- QR Code Library (self-hosted, SRI-pinned) -->
+        <script src="vendor/qrcodejs-1.0.0.min.js"
+            integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU"
+            crossorigin="anonymous"></script>
 
         <!-- Theme -->
         <script src="js/theme.js"></script>
